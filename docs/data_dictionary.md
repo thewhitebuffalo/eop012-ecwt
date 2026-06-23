@@ -115,6 +115,29 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `priority_reason` | text | Machine-readable priority explanation. |
 | `notes` | text | Manifest caveat or status note. |
 
+## `weather.noaa_raw_download_attempt`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `attempt_id` | text | Stable download-attempt row identifier. |
+| `manifest_id` | text | Manifest row consumed by this attempt. |
+| `manifest_run_id` | text | Manifest-build run that supplied the row. |
+| `calculation_run_id` | text | Download-attempt run lineage. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `source_year` | integer | NOAA Global Hourly source year. |
+| `raw_station_id` | text | Raw NOAA station ID used in filenames. |
+| `download_url` | text | Public AWS S3 object URL attempted. |
+| `target_path` | text | Local destination path. |
+| `attempted_at_utc` | timestamptz | Attempt start timestamp. |
+| `finished_at_utc` | timestamptz | Attempt finish timestamp. |
+| `http_status` | integer | HTTP status returned by the source when available. |
+| `download_status` | text | `downloaded`, `skipped_existing`, `failed_http`, `failed_exception`, or `dry_run`. |
+| `file_size_bytes` | bigint | Downloaded or observed file size. |
+| `file_sha256` | text | SHA-256 of downloaded or observed file. |
+| `source_file_id` | text | `audit.source_file` row for successful or pre-existing files. |
+| `error_message` | text | Failure detail when applicable. |
+| `notes` | text | Attempt caveat or status note. |
+
 ## `weather.station_coverage_audit`
 
 | Column | Type | Meaning |

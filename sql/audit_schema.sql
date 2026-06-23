@@ -204,6 +204,36 @@ create index if not exists ix_noaa_raw_backfill_manifest_batch
 create index if not exists ix_noaa_raw_backfill_manifest_year_status
     on weather.noaa_raw_backfill_manifest (source_year, manifest_status);
 
+create table if not exists weather.noaa_raw_download_attempt (
+    attempt_id text primary key,
+    manifest_id text not null references weather.noaa_raw_backfill_manifest(manifest_id),
+    manifest_run_id text not null references audit.calculation_run(calculation_run_id),
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    raw_station_id text not null,
+    download_url text not null,
+    target_path text not null,
+    attempted_at_utc timestamptz not null,
+    finished_at_utc timestamptz,
+    http_status integer,
+    download_status text not null,
+    file_size_bytes bigint,
+    file_sha256 text,
+    source_file_id text references audit.source_file(source_file_id),
+    error_message text,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (manifest_id, calculation_run_id),
+    constraint noaa_raw_download_attempt_status_check
+        check (download_status in ('downloaded', 'skipped_existing', 'failed_http', 'failed_exception', 'dry_run')),
+    constraint noaa_raw_download_attempt_sha256_len
+        check (file_sha256 is null or length(file_sha256) = 64)
+);
+
+create index if not exists ix_noaa_raw_download_attempt_status
+    on weather.noaa_raw_download_attempt (calculation_run_id, download_status);
+
 create table if not exists weather.station_coverage_audit (
     station_coverage_audit_id text primary key,
     station_id text not null references weather.station(station_id),

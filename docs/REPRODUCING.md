@@ -380,13 +380,37 @@ docs/noaa_backfill_manifest_report.md
 weather.noaa_raw_backfill_manifest
 ```
 
-Manifest URLs use this NOAA pattern:
+Manifest URLs use the public AWS S3 bucket for NOAA Global Hourly CSV:
 
 ```text
-https://www.ncei.noaa.gov/data/global-hourly/access/{year}/{USAFWBAN}.csv
+https://noaa-global-hourly-pds.s3.amazonaws.com/{year}/{USAFWBAN}.csv
 ```
 
 Rows are prioritized by missing whole years first, newer years first, and candidate stations linked to the most plants first. Batch 1 is the first manageable downloader test set.
+
+## Download One NOAA Backfill Batch
+
+This step consumes one manifest batch and records every attempt. Files are written through temporary `.part` files and moved into place only after a complete stream. Existing target files are not overwritten unless `--overwrite` is explicitly supplied.
+
+```bash
+python "$REPO/scripts/download_noaa_backfill_batch.py" \
+  --project-root "$REPO" \
+  --staging-root "$EOP012_DATA_ROOT/staging" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012 \
+  --batch-number 1 \
+  --max-workers 4
+```
+
+Expected outputs:
+
+```text
+docs/noaa_backfill_download_batch1_report.md
+weather.noaa_raw_download_attempt
+audit.source_file rows for successful or pre-existing files
+```
 
 ## Stop Postgres
 

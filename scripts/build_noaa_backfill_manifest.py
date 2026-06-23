@@ -24,7 +24,7 @@ PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_global_hourly_backfill_manifest"
-DEFAULT_BASE_URL = "https://www.ncei.noaa.gov/data/global-hourly/access"
+DEFAULT_BASE_URL = "https://noaa-global-hourly-pds.s3.amazonaws.com"
 
 
 def utc_now() -> datetime:
