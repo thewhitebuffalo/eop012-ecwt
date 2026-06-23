@@ -34,6 +34,7 @@ GitHub is the audit/control plane for this project, not the heavy weather-data w
 
 See:
 
+- `docs/REPRODUCING.md`
 - `docs/publication_plan.md`
 - `docs/methodology.md`
 - `docs/audit_schema.md`
