@@ -1,0 +1,14 @@
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+*.parquet
+*.zip
+.DS_Store
+.env
+.venv/
+__pycache__/
+data/raw/
+data/processed/
+db/
+
