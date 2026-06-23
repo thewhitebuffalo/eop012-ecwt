@@ -80,7 +80,7 @@ Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writ
   --limit-files 500
 ```
 
-The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-65 C` to `50 C`.
+The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-65 C` to `40 C`.
 
 ## Build Station-Year DJF Coverage
 
@@ -112,3 +112,14 @@ This populates `calc.station_ecwt` with provisional station-level ECWT values fr
 ```
 
 This populates `link.station_selection`, `link.station_selection_segment`, and `calc.plant_ecwt` for every plant. Selection is provisional: for each plant, the builder chooses the candidate station with provisional station ECWT and the largest loaded valid-hour count, then uses distance and original candidate rank as tie-breakers.
+
+## Build Plant ECWT Readiness Gates
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/build_plant_ecwt_readiness.py \
+  --plant-ecwt-run-id plant_ecwt_provisional_20260623T232311Z \
+  --min-valid-hours 2000 \
+  --min-coverage-ratio 0.95
+```
+
+This populates `calc.plant_ecwt_readiness`. The strict gate above is the current publication-readiness gate. Diagnostic gates may be run with lower coverage thresholds to understand near-term progress, but those rows should not be treated as publication-ready compliance output.

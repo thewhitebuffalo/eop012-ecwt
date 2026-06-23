@@ -432,6 +432,29 @@ create table if not exists calc.generator_ecwt (
         check (result_status in ('accepted', 'provisional', 'blocked', 'superseded'))
 );
 
+create table if not exists calc.plant_ecwt_readiness (
+    plant_ecwt_readiness_id text primary key,
+    plant_ecwt_id text not null references calc.plant_ecwt(plant_ecwt_id),
+    plant_id text not null references asset.plant(plant_id),
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    methodology_version text not null references audit.methodology_version(methodology_version),
+    selected_station_id text references weather.station(station_id),
+    valid_hour_count bigint not null,
+    expected_hour_count bigint not null,
+    coverage_ratio numeric,
+    min_valid_hour_threshold bigint not null,
+    min_coverage_ratio_threshold numeric not null,
+    readiness_status text not null,
+    reason_code text not null,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    constraint plant_ecwt_readiness_status_check
+        check (readiness_status in ('publication_candidate', 'provisional_low_coverage', 'blocked'))
+);
+
+create index if not exists ix_plant_ecwt_readiness_run_status
+    on calc.plant_ecwt_readiness (calculation_run_id, readiness_status);
+
 create table if not exists audit.exception_log (
     exception_id text primary key,
     calculation_run_id text references audit.calculation_run(calculation_run_id),

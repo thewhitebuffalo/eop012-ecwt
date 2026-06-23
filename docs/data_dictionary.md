@@ -279,6 +279,25 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `governing_ecwt_f` | numeric | Lowest accepted ECWT for the plant across accepted runs. |
 | `result_status` | text | `accepted`, `provisional`, `blocked`, or `superseded`. |
 
+## `calc.plant_ecwt_readiness`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `plant_ecwt_readiness_id` | text | Stable readiness row identifier. |
+| `plant_ecwt_id` | text | Plant ECWT row being classified. |
+| `plant_id` | text | Internal plant key. |
+| `calculation_run_id` | text | Readiness run lineage. |
+| `methodology_version` | text | Methodology version. |
+| `selected_station_id` | text | Selected NOAA station used by the plant ECWT row. |
+| `valid_hour_count` | bigint | Valid DJF dry-bulb hours in the plant ECWT row. |
+| `expected_hour_count` | bigint | Expected DJF hours in the selected coverage window. |
+| `coverage_ratio` | numeric | Valid divided by expected hours. |
+| `min_valid_hour_threshold` | bigint | Gate threshold used by this readiness run. |
+| `min_coverage_ratio_threshold` | numeric | Gate threshold used by this readiness run. |
+| `readiness_status` | text | `publication_candidate`, `provisional_low_coverage`, or `blocked`. |
+| `reason_code` | text | Machine-readable reason for the readiness status. |
+| `notes` | text | Readiness caveat or rule summary. |
+
 ## `audit.exception_log`
 
 | Column | Type | Meaning |
