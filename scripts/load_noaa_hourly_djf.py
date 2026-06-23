@@ -798,7 +798,7 @@ def main() -> int:
         default=["7"],
         help="NOAA SOURCE code to reject before TMP interpretation. Repeat or pass comma-separated values.",
     )
-    parser.add_argument("--min-temp-c", type=float, default=-90.0)
+    parser.add_argument("--min-temp-c", type=float, default=-65.0)
     parser.add_argument("--max-temp-c", type=float, default=50.0)
     args = parser.parse_args()
 

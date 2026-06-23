@@ -80,7 +80,7 @@ Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writ
   --limit-files 500
 ```
 
-The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-90 C` to `50 C`.
+The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-65 C` to `50 C`.
 
 ## Build Station-Year DJF Coverage
 
@@ -102,3 +102,13 @@ This populates `weather.station_year_djf_coverage` from the currently loaded can
 ```
 
 This populates `calc.station_ecwt` with provisional station-level ECWT values from loaded canonical weather. These are not final plant ECWT values; plant station selection and full coverage QA still have to run before publication.
+
+## Build Provisional Plant ECWT
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/build_provisional_plant_ecwt.py \
+  --candidate-run-id noaa_station_candidates_20260623T210132Z \
+  --station-ecwt-run-id station_ecwt_loaded_20260623T232301Z
+```
+
+This populates `link.station_selection`, `link.station_selection_segment`, and `calc.plant_ecwt` for every plant. Selection is provisional: for each plant, the builder chooses the candidate station with provisional station ECWT and the largest loaded valid-hour count, then uses distance and original candidate rank as tie-breakers.

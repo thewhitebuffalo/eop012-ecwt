@@ -233,6 +233,31 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `candidate_status` | text | `candidate`, `selected`, `rejected`, or `needs_review`. |
 | `reason_code` | text | Machine-readable reason. |
 
+## `link.station_selection`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `station_selection_id` | text | Stable station-selection identifier. |
+| `plant_id` | text | Internal plant key. |
+| `calculation_run_id` | text | Selection run lineage. |
+| `methodology_version` | text | Methodology version. |
+| `selection_status` | text | `algorithmic`, `manual_reviewed`, `provisional`, or `blocked`. |
+| `decision_basis` | text | Human-readable selection rule or blocking reason. |
+| `reviewer` | text | Optional reviewer identifier for future manual review. |
+| `notes` | text | Selection caveat or review note. |
+
+## `link.station_selection_segment`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `station_selection_segment_id` | text | Stable station-selection segment identifier. |
+| `station_selection_id` | text | Parent station selection. |
+| `station_id` | text | Selected NOAA ISD station. |
+| `segment_start_utc` | timestamptz | First UTC timestamp covered by the selected-station segment. |
+| `segment_end_utc` | timestamptz | Last UTC timestamp covered by the selected-station segment. |
+| `reason_code` | text | Machine-readable reason for the segment. |
+| `notes` | text | Segment caveat or selection detail. |
+
 ## `calc.plant_ecwt`
 
 | Column | Type | Meaning |
