@@ -14,7 +14,6 @@ Current reproducible scope:
 
 Not yet implemented:
 
-- NOAA station candidate generation.
 - NOAA hourly weather loading into the new EOP012 database.
 - Station selection decisions.
 - ECWT calculation.
@@ -251,6 +250,37 @@ Expected:
 | `plant_missing_coordinates` | 28 |
 | `generator_plant_code_not_in_plant_table` | 1 |
 
+## Load NOAA Station Metadata And Distance Candidates
+
+This step downloads NOAA ISD station history metadata and generates distance-only station candidates for every loaded EIA plant with valid coordinates. Hourly weather coverage is not attached yet.
+
+```bash
+python "$REPO/scripts/load_noaa_station_candidates.py" \
+  --project-root "$REPO" \
+  --station-history-csv "$EOP012_DATA_ROOT/raw/noaa/isd-history.csv" \
+  --staging-root "$EOP012_DATA_ROOT/staging" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012
+```
+
+Expected outputs:
+
+```text
+docs/noaa_station_candidate_report.md
+weather.station
+link.station_candidate
+```
+
+The candidate layer intentionally leaves these fields blank until the NOAA hourly coverage phase:
+
+```text
+valid_djf_hours
+expected_djf_hours
+coverage_ratio
+```
+
 ## Stop Postgres
 
 ```bash
@@ -276,4 +306,3 @@ Future NOAA and ECWT phases should follow the same pattern:
 3. Record source hashes, row counts, exceptions, and the producing Git commit.
 4. Publish small reports and manifests to Git.
 5. Keep heavy raw/weather/database artifacts outside Git.
-
