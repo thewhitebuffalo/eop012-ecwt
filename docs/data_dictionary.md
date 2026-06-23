@@ -76,6 +76,44 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `first_observation_utc` | timestamptz | Earliest known observation. |
 | `last_observation_utc` | timestamptz | Latest known observation. |
 
+## `weather.hourly_djf`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `station_id` | text | Canonical NOAA ISD station identifier. |
+| `hour_ending_utc` | timestamptz | Canonical UTC station-hour used for ECWT-oriented DJF weather analysis. Current loader policy floors the NOAA observation timestamp to the UTC hour. |
+| `hour_local` | timestamp | Reserved for local station-hour once timezone handling is added. |
+| `dry_bulb_c` | numeric | Dry-bulb temperature in degrees C parsed from NOAA Global Hourly `TMP`. |
+| `dry_bulb_f` | numeric | Dry-bulb temperature in degrees F. |
+| `source_file_id` | text | Source file lineage. Downloaded AWS files have per-file lineage; preexisting local-inventory files currently use the inventory source-root lineage. |
+| `quality_flags` | text[] | Loader-retained NOAA quality context, such as TMP quality code, report type, source code, and quality-control code. |
+| `calculation_run_id` | text | DJF load run that inserted or last updated the row. |
+
+## `weather.noaa_hourly_load_file`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `load_file_id` | text | Stable file-load row identifier. |
+| `calculation_run_id` | text | DJF load run lineage. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `source_year` | integer | NOAA Global Hourly source year. |
+| `raw_station_id` | text | Raw NOAA station ID used in filenames, usually `USAFWBAN`. |
+| `local_path` | text | Local CSV or gzip file parsed by the loader. |
+| `source_file_id` | text | Source file lineage when available. |
+| `source_basis` | text | Whether the file came from the preexisting raw inventory or a recorded AWS download attempt. |
+| `file_size_bytes` | bigint | File size when available. |
+| `file_status` | text | `loaded`, `failed`, or `skipped`. |
+| `rows_seen` | bigint | Total CSV rows read. |
+| `djf_rows_seen` | bigint | Rows whose observation timestamp is in December, January, or February. |
+| `valid_temp_rows` | bigint | DJF rows with a parseable non-missing `TMP` value accepted by the current loader. |
+| `invalid_temp_rows` | bigint | DJF rows with missing or rejected `TMP` values. |
+| `duplicate_hour_count` | bigint | Valid DJF observations that collided with another observation in the same canonical station-hour. |
+| `loaded_hour_count` | bigint | Canonical station-hour rows staged from the file. |
+| `min_hour_ending_utc` | timestamptz | Earliest canonical DJF hour loaded from the file. |
+| `max_hour_ending_utc` | timestamptz | Latest canonical DJF hour loaded from the file. |
+| `error_message` | text | Failure detail when applicable. |
+| `notes` | text | Loader policy or caveat. |
+
 ## `weather.noaa_raw_file_inventory`
 
 | Column | Type | Meaning |

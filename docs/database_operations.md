@@ -55,3 +55,29 @@ dbname=eop012
   /Users/Shared/EOP012/rebuild/scripts/load_eia860_assets_to_postgres.py
 ```
 
+## Download NOAA AWS Backfill Batch
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/download_noaa_backfill_batch.py \
+  --manifest-run-id noaa_backfill_manifest_20260623T215215Z \
+  --batch-number 5 \
+  --max-workers 4
+```
+
+Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writes successful files under `/Volumes/NOAA_CACHE/EOP012/raw/noaa/global-hourly`, records attempts in `weather.noaa_raw_download_attempt`, registers successful files in `audit.source_file`, and writes a report in `docs/`.
+
+## Load NOAA DJF Hourly Rows
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/load_noaa_hourly_djf.py \
+  --source downloaded \
+  --limit-files 500
+```
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/load_noaa_hourly_djf.py \
+  --source inventory \
+  --limit-files 500
+```
+
+The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. Use bounded batches until the NOAA source-quality rules are finalized; the current loader is suitable for pipeline validation and coverage development, not final compliance ECWT publication.

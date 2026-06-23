@@ -152,6 +152,39 @@ create table if not exists weather.hourly_djf (
 create index if not exists ix_weather_hourly_djf_hour
     on weather.hourly_djf (hour_ending_utc);
 
+create table if not exists weather.noaa_hourly_load_file (
+    load_file_id text primary key,
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    raw_station_id text not null,
+    local_path text not null,
+    source_file_id text references audit.source_file(source_file_id),
+    source_basis text not null,
+    file_size_bytes bigint,
+    file_status text not null,
+    rows_seen bigint not null default 0,
+    djf_rows_seen bigint not null default 0,
+    valid_temp_rows bigint not null default 0,
+    invalid_temp_rows bigint not null default 0,
+    duplicate_hour_count bigint not null default 0,
+    loaded_hour_count bigint not null default 0,
+    min_hour_ending_utc timestamptz,
+    max_hour_ending_utc timestamptz,
+    error_message text,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (station_id, source_year, local_path),
+    constraint noaa_hourly_load_file_status_check
+        check (file_status in ('loaded', 'failed', 'skipped'))
+);
+
+create index if not exists ix_noaa_hourly_load_file_status
+    on weather.noaa_hourly_load_file (calculation_run_id, file_status);
+
+create index if not exists ix_noaa_hourly_load_file_station_year
+    on weather.noaa_hourly_load_file (station_id, source_year);
+
 create table if not exists weather.noaa_raw_file_inventory (
     inventory_id text primary key,
     station_id text not null references weather.station(station_id),
