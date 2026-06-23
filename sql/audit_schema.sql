@@ -175,6 +175,35 @@ create table if not exists weather.noaa_raw_file_inventory (
 create index if not exists ix_noaa_raw_file_inventory_year_status
     on weather.noaa_raw_file_inventory (source_year, file_status);
 
+create table if not exists weather.noaa_raw_backfill_manifest (
+    manifest_id text primary key,
+    inventory_run_id text not null references audit.calculation_run(calculation_run_id),
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    raw_station_id text not null,
+    download_url text not null,
+    target_path text not null,
+    priority_rank integer not null,
+    batch_number integer not null,
+    station_candidate_plant_links integer not null,
+    source_year_available_count integer not null,
+    source_year_missing_count integer not null,
+    manifest_status text not null,
+    priority_reason text,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (inventory_run_id, station_id, source_year, calculation_run_id),
+    constraint noaa_raw_backfill_manifest_status_check
+        check (manifest_status in ('planned', 'downloaded', 'skipped', 'failed'))
+);
+
+create index if not exists ix_noaa_raw_backfill_manifest_batch
+    on weather.noaa_raw_backfill_manifest (calculation_run_id, batch_number, priority_rank);
+
+create index if not exists ix_noaa_raw_backfill_manifest_year_status
+    on weather.noaa_raw_backfill_manifest (source_year, manifest_status);
+
 create table if not exists weather.station_coverage_audit (
     station_coverage_audit_id text primary key,
     station_id text not null references weather.station(station_id),

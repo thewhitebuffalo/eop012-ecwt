@@ -357,6 +357,37 @@ weather.noaa_raw_file_inventory
 
 The inventory maps station IDs from `USAF-WBAN` to NOAA raw file names by removing the hyphen. For example, `725117-04827` maps to `72511704827.csv`.
 
+## Build NOAA Backfill Manifest
+
+This step converts missing raw-file inventory rows into a planned NOAA download queue. It does not download files.
+
+```bash
+python "$REPO/scripts/build_noaa_backfill_manifest.py" \
+  --project-root "$REPO" \
+  --staging-root "$EOP012_DATA_ROOT/staging" \
+  --target-root "$EOP012_DATA_ROOT/raw/noaa/global-hourly" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012 \
+  --batch-size 1000
+```
+
+Expected outputs:
+
+```text
+docs/noaa_backfill_manifest_report.md
+weather.noaa_raw_backfill_manifest
+```
+
+Manifest URLs use this NOAA pattern:
+
+```text
+https://www.ncei.noaa.gov/data/global-hourly/access/{year}/{USAFWBAN}.csv
+```
+
+Rows are prioritized by missing whole years first, newer years first, and candidate stations linked to the most plants first. Batch 1 is the first manageable downloader test set.
+
 ## Stop Postgres
 
 ```bash

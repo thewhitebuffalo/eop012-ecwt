@@ -94,6 +94,27 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `file_status` | text | `available` or `missing`. |
 | `notes` | text | Inventory caveat or status note. |
 
+## `weather.noaa_raw_backfill_manifest`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `manifest_id` | text | Stable planned-download row identifier. |
+| `inventory_run_id` | text | Raw-file inventory run used as input. |
+| `calculation_run_id` | text | Manifest-build run lineage. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `source_year` | integer | NOAA Global Hourly source year to backfill. |
+| `raw_station_id` | text | Raw NOAA station ID used in filenames. |
+| `download_url` | text | NOAA public CSV URL. |
+| `target_path` | text | Planned local destination path. |
+| `priority_rank` | integer | Stable manifest priority order. |
+| `batch_number` | integer | Download batch number. |
+| `station_candidate_plant_links` | integer | Number of candidate plant links for the station. |
+| `source_year_available_count` | integer | Available station-year files found in the source year during inventory. |
+| `source_year_missing_count` | integer | Missing station-year files found in the source year during inventory. |
+| `manifest_status` | text | `planned`, `downloaded`, `skipped`, or `failed`. |
+| `priority_reason` | text | Machine-readable priority explanation. |
+| `notes` | text | Manifest caveat or status note. |
+
 ## `weather.station_coverage_audit`
 
 | Column | Type | Meaning |
