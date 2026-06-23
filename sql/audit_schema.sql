@@ -164,6 +164,8 @@ create table if not exists weather.station_coverage_audit (
     duplicate_hour_count bigint not null,
     invalid_temp_count bigint not null,
     coverage_ratio numeric,
+    source_basis text,
+    notes text,
     created_at_utc timestamptz not null default now()
 );
 
@@ -309,4 +311,3 @@ create table if not exists publish.release_artifact (
     constraint release_artifact_sha256_len
         check (sha256 is null or length(sha256) = 64)
 );
-

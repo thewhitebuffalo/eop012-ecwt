@@ -76,6 +76,24 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `first_observation_utc` | timestamptz | Earliest known observation. |
 | `last_observation_utc` | timestamptz | Latest known observation. |
 
+## `weather.station_coverage_audit`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `station_coverage_audit_id` | text | Stable coverage-audit row identifier. |
+| `station_id` | text | Weather station audited. |
+| `calculation_run_id` | text | Coverage-audit run lineage. |
+| `period_start_utc` | timestamptz | First timestamp in the audited period. |
+| `period_end_utc` | timestamptz | Last timestamp in the audited period. |
+| `expected_djf_hours` | bigint | Expected DJF hours in the audited period. |
+| `valid_djf_hours` | bigint | Valid dry-bulb sample hours found for the station. |
+| `missing_hour_count` | bigint | Expected minus valid hours. |
+| `duplicate_hour_count` | bigint | Duplicate/excess source hours identified by the audit method. |
+| `invalid_temp_count` | bigint | Present but invalid dry-bulb observations identified by the audit method. |
+| `coverage_ratio` | numeric | Valid divided by expected hours. |
+| `source_basis` | text | Source/method used to produce the coverage counts. |
+| `notes` | text | Caveats for the coverage-audit method. |
+
 ## `link.station_candidate`
 
 | Column | Type | Meaning |
@@ -124,4 +142,3 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `reason_code` | text | Machine-readable reason. |
 | `message` | text | Human-readable explanation. |
 | `resolution_status` | text | `open`, `resolved`, `accepted_risk`, or `blocked`. |
-

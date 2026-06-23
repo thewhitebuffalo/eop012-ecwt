@@ -281,6 +281,48 @@ expected_djf_hours
 coverage_ratio
 ```
 
+## Load NOAA Weather Coverage Audit
+
+This step enriches the station candidates with fast NOAA coverage metrics from the legacy NOAA cache's station-level sample-hour table.
+
+The source cluster must be running separately on port `5435`:
+
+```bash
+"$PG_BIN/pg_ctl" \
+  -D /Volumes/NOAA_CACHE/postgres16_weather_build_5435 \
+  -l /Volumes/NOAA_CACHE/postgres16_weather_build_5435/server.log \
+  -o "-p 5435 -h 127.0.0.1" \
+  start
+```
+
+Then run:
+
+```bash
+python "$REPO/scripts/load_noaa_weather_coverage_audit.py" \
+  --project-root "$REPO" \
+  --staging-root "$EOP012_DATA_ROOT/staging" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012 \
+  --source-host 127.0.0.1 \
+  --source-port 5435 \
+  --source-dbname noaa_djf_hourly_bytower \
+  --source-user Athena
+```
+
+Expected outputs:
+
+```text
+docs/noaa_weather_coverage_audit_report.md
+weather.station_coverage_audit
+link.station_candidate.valid_djf_hours
+link.station_candidate.expected_djf_hours
+link.station_candidate.coverage_ratio
+```
+
+This is a fast coverage triage step. It uses `public.ecwt_raw_station.sample_hours` in the legacy NOAA cache and does not replace the later full NOAA hourly rebuild/recount needed for compliance-grade missing-hour, duplicate-hour, and invalid-temperature evidence.
+
 ## Stop Postgres
 
 ```bash
