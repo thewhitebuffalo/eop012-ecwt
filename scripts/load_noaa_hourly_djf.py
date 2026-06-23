@@ -139,8 +139,10 @@ create table if not exists weather.noaa_hourly_load_file (
     file_status text not null,
     rows_seen bigint not null default 0,
     djf_rows_seen bigint not null default 0,
+    rejected_source_rows bigint not null default 0,
     valid_temp_rows bigint not null default 0,
     invalid_temp_rows bigint not null default 0,
+    rejected_plausibility_rows bigint not null default 0,
     duplicate_hour_count bigint not null default 0,
     loaded_hour_count bigint not null default 0,
     min_hour_ending_utc timestamptz,
@@ -156,6 +158,10 @@ create index if not exists ix_noaa_hourly_load_file_status
     on weather.noaa_hourly_load_file (calculation_run_id, file_status);
 create index if not exists ix_noaa_hourly_load_file_station_year
     on weather.noaa_hourly_load_file (station_id, source_year);
+alter table weather.noaa_hourly_load_file
+    add column if not exists rejected_source_rows bigint not null default 0;
+alter table weather.noaa_hourly_load_file
+    add column if not exists rejected_plausibility_rows bigint not null default 0;
 """
     run(psql_cmd(psql, host, port, dbname, user), input_text=sql)
 
@@ -282,15 +288,32 @@ def parse_tmp(tmp: str) -> tuple[float | None, str | None]:
         return None, quality
 
 
-def observation_score(row: dict[str, str], dt: datetime, tmp_quality: str | None) -> tuple[int, int, int]:
+def parse_code_set(values: list[str] | None) -> set[str]:
+    codes: set[str] = set()
+    for value in values or []:
+        for code in value.split(","):
+            cleaned = code.strip()
+            if cleaned:
+                codes.add(cleaned)
+    return codes
+
+
+def observation_score(row: dict[str, str], dt: datetime, tmp_quality: str | None) -> tuple[int, int, int, int]:
     quality_rank = {"1": 0, "5": 1, "0": 2}.get(tmp_quality or "", 5)
     report_type = (row.get("REPORT_TYPE") or "").strip()
     report_rank = 0 if report_type.startswith("FM") else 1
+    source_rank = {"4": 0, "6": 2, "7": 10}.get((row.get("SOURCE") or "").strip(), 3)
     minute_rank = abs(dt.minute - 56)
-    return quality_rank, report_rank, minute_rank
+    return quality_rank, report_rank, source_rank, minute_rank
 
 
-def parse_file(row: dict[str, str], run_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
+def parse_file(
+    row: dict[str, str],
+    run_id: str,
+    reject_source_codes: set[str],
+    min_temp_c: float,
+    max_temp_c: float,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     path = Path(row["local_path"])
     station_id = row["station_id"]
     source_year = int(row["source_year"])
@@ -311,8 +334,10 @@ def parse_file(row: dict[str, str], run_id: str) -> tuple[list[dict[str, object]
         "file_status": "loaded",
         "rows_seen": 0,
         "djf_rows_seen": 0,
+        "rejected_source_rows": 0,
         "valid_temp_rows": 0,
         "invalid_temp_rows": 0,
+        "rejected_plausibility_rows": 0,
         "duplicate_hour_count": 0,
         "loaded_hour_count": 0,
         "min_hour_ending_utc": None,
@@ -321,7 +346,7 @@ def parse_file(row: dict[str, str], run_id: str) -> tuple[list[dict[str, object]
         "notes": "DJF rows loaded from NOAA Global Hourly CSV using canonical hour = observation timestamp floored to the UTC hour.",
     }
     best_by_hour: dict[datetime, dict[str, object]] = {}
-    best_score_by_hour: dict[datetime, tuple[int, int, int]] = {}
+    best_score_by_hour: dict[datetime, tuple[int, int, int, int]] = {}
 
     try:
         with open_text(path) as f:
@@ -333,9 +358,17 @@ def parse_file(row: dict[str, str], run_id: str) -> tuple[list[dict[str, object]
                     continue
                 stats["djf_rows_seen"] = int(stats["djf_rows_seen"]) + 1
 
+                noaa_source = (raw.get("SOURCE") or "").strip()
+                if noaa_source in reject_source_codes:
+                    stats["rejected_source_rows"] = int(stats["rejected_source_rows"]) + 1
+                    continue
+
                 temp_c, tmp_quality = parse_tmp(raw.get("TMP", ""))
                 if temp_c is None:
                     stats["invalid_temp_rows"] = int(stats["invalid_temp_rows"]) + 1
+                    continue
+                if temp_c < min_temp_c or temp_c > max_temp_c:
+                    stats["rejected_plausibility_rows"] = int(stats["rejected_plausibility_rows"]) + 1
                     continue
                 stats["valid_temp_rows"] = int(stats["valid_temp_rows"]) + 1
 
@@ -344,7 +377,7 @@ def parse_file(row: dict[str, str], run_id: str) -> tuple[list[dict[str, object]
                     [
                         f"tmp_quality:{tmp_quality or ''}",
                         f"report_type:{(raw.get('REPORT_TYPE') or '').strip()}",
-                        f"source:{raw.get('SOURCE') or ''}",
+                        f"source:{noaa_source}",
                         f"qc:{raw.get('QUALITY_CONTROL') or ''}",
                     ]
                 )
@@ -416,8 +449,10 @@ def build_load_sql(
         "file_status",
         "rows_seen",
         "djf_rows_seen",
+        "rejected_source_rows",
         "valid_temp_rows",
         "invalid_temp_rows",
+        "rejected_plausibility_rows",
         "duplicate_hour_count",
         "loaded_hour_count",
         "min_hour_ending_utc",
@@ -525,8 +560,10 @@ create temp table stg_noaa_hourly_load_file (
     file_status text,
     rows_seen bigint,
     djf_rows_seen bigint,
+    rejected_source_rows bigint,
     valid_temp_rows bigint,
     invalid_temp_rows bigint,
+    rejected_plausibility_rows bigint,
     duplicate_hour_count bigint,
     loaded_hour_count bigint,
     min_hour_ending_utc timestamptz,
@@ -550,8 +587,10 @@ insert into weather.noaa_hourly_load_file (
     file_status,
     rows_seen,
     djf_rows_seen,
+    rejected_source_rows,
     valid_temp_rows,
     invalid_temp_rows,
+    rejected_plausibility_rows,
     duplicate_hour_count,
     loaded_hour_count,
     min_hour_ending_utc,
@@ -572,8 +611,10 @@ select
     file_status,
     rows_seen,
     djf_rows_seen,
+    rejected_source_rows,
     valid_temp_rows,
     invalid_temp_rows,
+    rejected_plausibility_rows,
     duplicate_hour_count,
     loaded_hour_count,
     min_hour_ending_utc,
@@ -590,8 +631,10 @@ on conflict (station_id, source_year, local_path) do update set
     file_status = excluded.file_status,
     rows_seen = excluded.rows_seen,
     djf_rows_seen = excluded.djf_rows_seen,
+    rejected_source_rows = excluded.rejected_source_rows,
     valid_temp_rows = excluded.valid_temp_rows,
     invalid_temp_rows = excluded.invalid_temp_rows,
+    rejected_plausibility_rows = excluded.rejected_plausibility_rows,
     duplicate_hour_count = excluded.duplicate_hour_count,
     loaded_hour_count = excluded.loaded_hour_count,
     min_hour_ending_utc = excluded.min_hour_ending_utc,
@@ -629,6 +672,14 @@ def report_counts(psql: Path, host: str, port: int, dbname: str, user: str | Non
                 f"select coalesce(sum(invalid_temp_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
             ),
             (
+                "rejected source rows for this run",
+                f"select coalesce(sum(rejected_source_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+            ),
+            (
+                "rejected plausibility rows for this run",
+                f"select coalesce(sum(rejected_plausibility_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+            ),
+            (
                 "duplicate hour count for this run",
                 f"select coalesce(sum(duplicate_hour_count),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
             ),
@@ -659,8 +710,10 @@ def render_report(
     total_bytes = sum(int(row.get("file_size_bytes") or 0) for row in file_stats)
     total_seen = sum(int(row["rows_seen"]) for row in file_stats)
     total_djf_seen = sum(int(row["djf_rows_seen"]) for row in file_stats)
+    total_rejected_source = sum(int(row["rejected_source_rows"]) for row in file_stats)
     total_valid = sum(int(row["valid_temp_rows"]) for row in file_stats)
     total_invalid = sum(int(row["invalid_temp_rows"]) for row in file_stats)
+    total_rejected_plausibility = sum(int(row["rejected_plausibility_rows"]) for row in file_stats)
     total_dupes = sum(int(row["duplicate_hour_count"]) for row in file_stats)
     years = sorted({int(row["source_year"]) for row in file_rows})
     lines = [
@@ -681,6 +734,8 @@ def render_report(
         f"- Code commit: `{code_commit}`",
         f"- Source selector: `{params['source']}`",
         f"- Limit files: `{params['limit_files']}`",
+        f"- Rejected NOAA source codes: `{params['reject_source_codes']}`",
+        f"- Plausible temperature range C: `{params['min_temp_c']}` to `{params['max_temp_c']}`",
         f"- Years represented: `{years[0] if years else None}-{years[-1] if years else None}`",
         "",
         "## Results",
@@ -693,8 +748,10 @@ def render_report(
         f"| Source bytes parsed | {total_bytes} |",
         f"| Raw rows seen | {total_seen} |",
         f"| DJF rows seen | {total_djf_seen} |",
+        f"| Rejected source-code rows | {total_rejected_source} |",
         f"| Valid DJF temperature rows | {total_valid} |",
         f"| Invalid DJF temperature rows | {total_invalid} |",
+        f"| Rejected plausibility rows | {total_rejected_plausibility} |",
         f"| Duplicate station-hour observations | {total_dupes} |",
         f"| Canonical hourly rows staged | {hourly_rows_count} |",
         "",
@@ -712,9 +769,11 @@ def render_report(
             "",
             "- This loader populates `weather.hourly_djf`, not the final ECWT tables.",
             "- `TMP` values are parsed as tenths of degrees C; `+9999` and quality code `9` are treated as invalid.",
+            "- Configured rejected NOAA source codes are excluded before TMP interpretation.",
+            "- Rows outside the configured C range are excluded as physically implausible for canonical ECWT weather input.",
             "- Multiple valid observations in the same station-hour are collapsed to one canonical hour using quality, report type, and closeness to minute 56.",
             "- The timestamp policy for this run is: canonical hour = NOAA observation timestamp floored to the UTC hour.",
-            "- This is a parser/load artifact, not a final compliance ECWT input. NOAA source-quality and plausibility filters must be finalized before publication.",
+            "- This is now a canonical-load candidate, but final compliance publication still depends on station selection and ECWT method validation.",
             "",
         ]
     )
@@ -733,12 +792,23 @@ def main() -> int:
     parser.add_argument("--source", choices=["all", "downloaded", "inventory"], default="all")
     parser.add_argument("--limit-files", type=int, default=25)
     parser.add_argument("--include-loaded", action="store_true")
+    parser.add_argument(
+        "--reject-source-code",
+        action="append",
+        default=["7"],
+        help="NOAA SOURCE code to reject before TMP interpretation. Repeat or pass comma-separated values.",
+    )
+    parser.add_argument("--min-temp-c", type=float, default=-90.0)
+    parser.add_argument("--max-temp-c", type=float, default=50.0)
     args = parser.parse_args()
 
     if not args.psql.exists():
         raise FileNotFoundError(args.psql)
+    if args.min_temp_c >= args.max_temp_c:
+        raise ValueError("--min-temp-c must be lower than --max-temp-c")
 
     ensure_load_schema(args.psql, args.host, args.port, args.dbname, args.user)
+    reject_source_codes = parse_code_set(args.reject_source_code)
 
     code_commit = git_commit_label(args.project_root)
     run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -760,7 +830,7 @@ def main() -> int:
     hourly_rows: list[dict[str, object]] = []
     file_stats: list[dict[str, object]] = []
     for row in file_rows:
-        parsed_rows, stats = parse_file(row, run_id)
+        parsed_rows, stats = parse_file(row, run_id, reject_source_codes, args.min_temp_c, args.max_temp_c)
         hourly_rows.extend(parsed_rows)
         file_stats.append(stats)
 
@@ -787,8 +857,10 @@ def main() -> int:
         "file_status",
         "rows_seen",
         "djf_rows_seen",
+        "rejected_source_rows",
         "valid_temp_rows",
         "invalid_temp_rows",
+        "rejected_plausibility_rows",
         "duplicate_hour_count",
         "loaded_hour_count",
         "min_hour_ending_utc",
@@ -804,6 +876,9 @@ def main() -> int:
         "source": args.source,
         "limit_files": args.limit_files,
         "include_loaded": args.include_loaded,
+        "reject_source_codes": sorted(reject_source_codes),
+        "min_temp_c": args.min_temp_c,
+        "max_temp_c": args.max_temp_c,
         "file_count": len(file_rows),
         "hourly_rows_staged": len(hourly_rows),
         "tmp_units": "NOAA TMP tenths of degrees C converted to C and F",

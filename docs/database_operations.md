@@ -80,4 +80,25 @@ Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writ
   --limit-files 500
 ```
 
-The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. Use bounded batches until the NOAA source-quality rules are finalized; the current loader is suitable for pipeline validation and coverage development, not final compliance ECWT publication.
+The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-90 C` to `50 C`.
+
+## Build Station-Year DJF Coverage
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/build_station_year_djf_coverage.py \
+  --min-year 2000 \
+  --max-year 2025 \
+  --complete-threshold 0.95
+```
+
+This populates `weather.station_year_djf_coverage` from the currently loaded canonical `weather.hourly_djf` rows and the file-level loader audit.
+
+## Build Provisional Station ECWT
+
+```bash
+/Users/Shared/EOP012/rebuild/scripts/build_station_ecwt_from_loaded.py \
+  --coverage-run-id station_year_djf_coverage_20260623T225900Z \
+  --percentile-target 0.002
+```
+
+This populates `calc.station_ecwt` with provisional station-level ECWT values from loaded canonical weather. These are not final plant ECWT values; plant station selection and full coverage QA still have to run before publication.

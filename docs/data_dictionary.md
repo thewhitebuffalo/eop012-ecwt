@@ -105,14 +105,38 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `file_status` | text | `loaded`, `failed`, or `skipped`. |
 | `rows_seen` | bigint | Total CSV rows read. |
 | `djf_rows_seen` | bigint | Rows whose observation timestamp is in December, January, or February. |
+| `rejected_source_rows` | bigint | DJF rows rejected before TMP interpretation because their NOAA `SOURCE` code is excluded by the canonical loader. |
 | `valid_temp_rows` | bigint | DJF rows with a parseable non-missing `TMP` value accepted by the current loader. |
 | `invalid_temp_rows` | bigint | DJF rows with missing or rejected `TMP` values. |
+| `rejected_plausibility_rows` | bigint | DJF rows rejected because parsed dry-bulb temperature is outside the configured plausibility range. |
 | `duplicate_hour_count` | bigint | Valid DJF observations that collided with another observation in the same canonical station-hour. |
 | `loaded_hour_count` | bigint | Canonical station-hour rows staged from the file. |
 | `min_hour_ending_utc` | timestamptz | Earliest canonical DJF hour loaded from the file. |
 | `max_hour_ending_utc` | timestamptz | Latest canonical DJF hour loaded from the file. |
 | `error_message` | text | Failure detail when applicable. |
 | `notes` | text | Loader policy or caveat. |
+
+## `weather.station_year_djf_coverage`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `station_year_djf_coverage_id` | text | Stable station-year coverage row identifier. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `source_year` | integer | NOAA Global Hourly source year. |
+| `calculation_run_id` | text | Coverage-build run lineage. |
+| `period_start_utc` | timestamptz | Start of the source calendar year. |
+| `period_end_utc` | timestamptz | End of the source calendar year. |
+| `expected_djf_hours` | bigint | Expected UTC hours in January, February, and December for the source year. |
+| `valid_djf_hours` | bigint | Canonical loaded DJF hours available for the station-year. |
+| `missing_hour_count` | bigint | Expected minus valid DJF hours. |
+| `loaded_file_count` | bigint | Loaded raw files contributing audit metrics for the station-year. |
+| `invalid_temp_row_count` | bigint | Missing or invalid DJF TMP rows observed during loading. |
+| `rejected_source_row_count` | bigint | Rows rejected by NOAA source-code policy. |
+| `rejected_plausibility_row_count` | bigint | Rows rejected by physical plausibility policy. |
+| `duplicate_hour_count` | bigint | Duplicate same-station-hour source observations collapsed by the loader. |
+| `coverage_ratio` | numeric | Valid divided by expected DJF hours. |
+| `coverage_status` | text | `complete`, `partial`, or `empty`. |
+| `notes` | text | Coverage caveat or rule summary. |
 
 ## `weather.noaa_raw_file_inventory`
 

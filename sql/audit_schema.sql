@@ -165,8 +165,10 @@ create table if not exists weather.noaa_hourly_load_file (
     file_status text not null,
     rows_seen bigint not null default 0,
     djf_rows_seen bigint not null default 0,
+    rejected_source_rows bigint not null default 0,
     valid_temp_rows bigint not null default 0,
     invalid_temp_rows bigint not null default 0,
+    rejected_plausibility_rows bigint not null default 0,
     duplicate_hour_count bigint not null default 0,
     loaded_hour_count bigint not null default 0,
     min_hour_ending_utc timestamptz,
@@ -184,6 +186,42 @@ create index if not exists ix_noaa_hourly_load_file_status
 
 create index if not exists ix_noaa_hourly_load_file_station_year
     on weather.noaa_hourly_load_file (station_id, source_year);
+
+alter table weather.noaa_hourly_load_file
+    add column if not exists rejected_source_rows bigint not null default 0;
+
+alter table weather.noaa_hourly_load_file
+    add column if not exists rejected_plausibility_rows bigint not null default 0;
+
+create table if not exists weather.station_year_djf_coverage (
+    station_year_djf_coverage_id text primary key,
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    period_start_utc timestamptz not null,
+    period_end_utc timestamptz not null,
+    expected_djf_hours bigint not null,
+    valid_djf_hours bigint not null,
+    missing_hour_count bigint not null,
+    loaded_file_count bigint not null,
+    invalid_temp_row_count bigint not null,
+    rejected_source_row_count bigint not null,
+    rejected_plausibility_row_count bigint not null,
+    duplicate_hour_count bigint not null,
+    coverage_ratio numeric,
+    coverage_status text not null,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (station_id, source_year, calculation_run_id),
+    constraint station_year_djf_coverage_status_check
+        check (coverage_status in ('complete', 'partial', 'empty'))
+);
+
+create index if not exists ix_station_year_djf_coverage_station_year
+    on weather.station_year_djf_coverage (station_id, source_year);
+
+create index if not exists ix_station_year_djf_coverage_status
+    on weather.station_year_djf_coverage (calculation_run_id, coverage_status);
 
 create table if not exists weather.noaa_raw_file_inventory (
     inventory_id text primary key,
