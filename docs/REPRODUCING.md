@@ -323,6 +323,40 @@ link.station_candidate.coverage_ratio
 
 This is a fast coverage triage step. It uses `public.ecwt_raw_station.sample_hours` in the legacy NOAA cache and does not replace the later full NOAA hourly rebuild/recount needed for compliance-grade missing-hour, duplicate-hour, and invalid-temperature evidence.
 
+## Inventory Local NOAA Raw Files
+
+This step inventories local NOAA Global Hourly station-year CSV files for the candidate stations. It does not parse hourly observations yet.
+
+```bash
+python "$REPO/scripts/inventory_noaa_raw_files.py" \
+  --project-root "$REPO" \
+  --staging-root "$EOP012_DATA_ROOT/staging" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012 \
+  --start-year 2000 \
+  --end-year 2025
+```
+
+Default raw roots, in priority order:
+
+```text
+/Volumes/NOAA_CACHE/noaa-global-hourly-pds-full
+/Volumes/NOAA_CACHE/noaa-global-hourly-year-staging
+/Volumes/NOAA_CACHE/noaa-global-hourly-unified
+/Volumes/NOAA_CACHE/BACKUP_TO_DELETE_LATER_noaa-cache_2026-02-19
+```
+
+Expected outputs:
+
+```text
+docs/noaa_raw_file_inventory_report.md
+weather.noaa_raw_file_inventory
+```
+
+The inventory maps station IDs from `USAF-WBAN` to NOAA raw file names by removing the hyphen. For example, `725117-04827` maps to `72511704827.csv`.
+
 ## Stop Postgres
 
 ```bash

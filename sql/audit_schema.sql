@@ -152,6 +152,29 @@ create table if not exists weather.hourly_djf (
 create index if not exists ix_weather_hourly_djf_hour
     on weather.hourly_djf (hour_ending_utc);
 
+create table if not exists weather.noaa_raw_file_inventory (
+    inventory_id text primary key,
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    source_file_id text references audit.source_file(source_file_id),
+    raw_station_id text not null,
+    local_path text,
+    file_name text,
+    source_root text,
+    file_size_bytes bigint,
+    file_mtime_utc timestamptz,
+    file_status text not null,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (station_id, source_year, calculation_run_id),
+    constraint noaa_raw_file_inventory_status_check
+        check (file_status in ('available', 'missing'))
+);
+
+create index if not exists ix_noaa_raw_file_inventory_year_status
+    on weather.noaa_raw_file_inventory (source_year, file_status);
+
 create table if not exists weather.station_coverage_audit (
     station_coverage_audit_id text primary key,
     station_id text not null references weather.station(station_id),

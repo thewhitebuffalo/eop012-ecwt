@@ -76,6 +76,24 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `first_observation_utc` | timestamptz | Earliest known observation. |
 | `last_observation_utc` | timestamptz | Latest known observation. |
 
+## `weather.noaa_raw_file_inventory`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `inventory_id` | text | Stable raw-file inventory row identifier. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `source_year` | integer | NOAA Global Hourly source year. |
+| `calculation_run_id` | text | Inventory run lineage. |
+| `source_file_id` | text | Source-root inventory provenance. |
+| `raw_station_id` | text | Raw NOAA station ID used in filenames, usually `USAFWBAN`. |
+| `local_path` | text | Local raw file path when available. |
+| `file_name` | text | Local raw file name when available. |
+| `source_root` | text | Configured raw root that supplied the file. |
+| `file_size_bytes` | bigint | File size when available. |
+| `file_mtime_utc` | timestamptz | Local file modified timestamp. |
+| `file_status` | text | `available` or `missing`. |
+| `notes` | text | Inventory caveat or status note. |
+
 ## `weather.station_coverage_audit`
 
 | Column | Type | Meaning |
