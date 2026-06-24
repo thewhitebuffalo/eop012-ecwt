@@ -29,6 +29,7 @@ PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_global_hourly_djf_load"
 DJF_MONTHS = {12, 1, 2}
+SHEF_MIN_TEMP_C = -50.0
 
 
 def utc_now() -> datetime:
@@ -367,7 +368,8 @@ def parse_file(
                 if temp_c is None:
                     stats["invalid_temp_rows"] = int(stats["invalid_temp_rows"]) + 1
                     continue
-                if temp_c < min_temp_c or temp_c > max_temp_c:
+                report_type = (raw.get("REPORT_TYPE") or "").strip()
+                if temp_c < min_temp_c or temp_c > max_temp_c or (report_type == "SHEF" and temp_c < SHEF_MIN_TEMP_C):
                     stats["rejected_plausibility_rows"] = int(stats["rejected_plausibility_rows"]) + 1
                     continue
                 stats["valid_temp_rows"] = int(stats["valid_temp_rows"]) + 1
@@ -376,7 +378,7 @@ def parse_file(
                 quality_flags = "|".join(
                     [
                         f"tmp_quality:{tmp_quality or ''}",
-                        f"report_type:{(raw.get('REPORT_TYPE') or '').strip()}",
+                        f"report_type:{report_type}",
                         f"source:{noaa_source}",
                         f"qc:{raw.get('QUALITY_CONTROL') or ''}",
                     ]

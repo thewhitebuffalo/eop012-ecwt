@@ -80,7 +80,7 @@ Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writ
   --limit-files 500
 ```
 
-The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation and rejects parsed temperatures outside `-65 C` to `40 C`.
+The loader populates `weather.hourly_djf` and records file-level parse metrics in `weather.noaa_hourly_load_file`. The canonical default rejects NOAA `SOURCE=7` before TMP interpretation, rejects parsed temperatures outside `-65 C` to `40 C`, and rejects `SHEF` report-type temperatures below `-50 C`.
 
 By default, loader reports avoid expensive exact `weather.hourly_djf` table scans: the total weather row count is a PostgreSQL planner estimate and the run row count comes from `weather.noaa_hourly_load_file.loaded_hour_count`. Use `--exact-db-counts` only when an exact report-time `count(*)` validation is worth the extra runtime.
 
