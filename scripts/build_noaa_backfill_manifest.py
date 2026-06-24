@@ -177,12 +177,26 @@ def missing_inventory_rows(
             yc.source_year_available_count::text as source_year_available_count,
             yc.source_year_missing_count::text as source_year_missing_count
         from weather.noaa_raw_file_inventory i
+        join weather.station st
+          on st.station_id = i.station_id
         join year_counts yc
           on yc.source_year = i.source_year
         left join station_links sl
           on sl.station_id = i.station_id
         where i.calculation_run_id = {sql_literal(inventory_run_id)}
           and i.file_status = 'missing'
+          and (
+            st.first_observation_utc is null
+            or st.last_observation_utc is null
+            or (
+                st.first_observation_utc < make_timestamptz(i.source_year, 3, 1, 0, 0, 0, 'UTC')
+                and st.last_observation_utc >= make_timestamptz(i.source_year, 1, 1, 0, 0, 0, 'UTC')
+            )
+            or (
+                st.first_observation_utc < make_timestamptz(i.source_year + 1, 1, 1, 0, 0, 0, 'UTC')
+                and st.last_observation_utc >= make_timestamptz(i.source_year, 12, 1, 0, 0, 0, 'UTC')
+            )
+          )
         """,
         user,
     )
