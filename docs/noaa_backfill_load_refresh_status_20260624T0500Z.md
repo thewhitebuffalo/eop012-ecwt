@@ -62,8 +62,8 @@ Current NOAA/cache status:
 | Station-year coverage | `station_year_djf_coverage_20260624T044835Z` | 28,858 rows; 4,384 complete, 23,781 partial, 693 empty |
 | Station ECWT | `station_ecwt_loaded_20260624T045251Z` | 3,093 provisional, 78 blocked |
 | Plant ECWT | `plant_ecwt_provisional_20260624T045441Z` | 16,104 provisional, 28 blocked |
-| Strict plant readiness | `plant_ecwt_readiness_20260624T050109Z` | 44 publication candidates |
-| Diagnostic plant readiness | `plant_ecwt_readiness_20260624T050120Z` | 2,170 diagnostic candidates |
+| Strict plant readiness | `plant_ecwt_readiness_20260624T050435Z` | 44 publication candidates |
+| Diagnostic plant readiness | `plant_ecwt_readiness_20260624T050443Z` | 2,170 diagnostic candidates |
 
 Current canonical weather:
 

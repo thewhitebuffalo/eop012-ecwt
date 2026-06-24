@@ -1,6 +1,6 @@
 # Plant ECWT Readiness Report
 
-Generated UTC: 2026-06-24T05:01:15+00:00
+Generated UTC: 2026-06-24T05:04:37+00:00
 
 ## Database
 
@@ -10,10 +10,10 @@ Generated UTC: 2026-06-24T05:01:15+00:00
 
 ## Run
 
-- Calculation run ID: `plant_ecwt_readiness_20260624T050109Z`
+- Calculation run ID: `plant_ecwt_readiness_20260624T050435Z`
 - Plant ECWT run ID: `plant_ecwt_provisional_20260624T045441Z`
 - Methodology version: `eop012-ecwt-method-v0.1.0`
-- Code commit: `aa9c265cafadf49d1669913bab20952c2e30a882`
+- Code commit: `d28d29f12914f1f4831ff4dce78f660e17398e06`
 - Minimum valid hours: `2000`
 - Minimum coverage ratio: `0.95`
 - Coverage denominator: `fixed selected-station active-period DJF hours`
