@@ -102,6 +102,8 @@ Later ranking can add:
 
 The default selected station is the nearest reliable representative station with adequate coverage. A farther station can be selected when documented evidence makes it more representative.
 
+For automated provisional rebuilds, station rank and distance are treated as representative-station evidence. Loaded weather coverage is measured downstream in readiness gates and should not be used to pick a farther station merely because that station currently has more downloaded hourly observations.
+
 If the best representative station begins after 2000-01-01, the station selection may be segmented:
 
 - use the best representative station for its active period
@@ -188,4 +190,3 @@ Examples:
 - ECWT result depends on unresolved missing data
 
 All exceptions should be published with reason codes and resolution status.
-

@@ -106,7 +106,7 @@ def build_sql(
     params = {
         "candidate_run_id": candidate_run_id,
         "station_ecwt_run_id": station_ecwt_run_id,
-        "selection_rule": "For each plant, choose the candidate station with provisional station ECWT and the largest valid_hour_count; ties use shortest distance_km then lowest candidate rank_order.",
+        "selection_rule": "For each plant, choose the lowest rank_order candidate station with provisional station ECWT; ties use shortest distance_km, largest valid_hour_count, then station_id.",
         "result_status": "provisional unless no candidate station has provisional station ECWT, then blocked",
     }
     return f"""
@@ -161,9 +161,9 @@ with candidate_scores as (
         row_number() over (
             partition by sc.plant_id
             order by
-                se.valid_hour_count desc nulls last,
-                sc.distance_km asc nulls last,
                 sc.rank_order asc nulls last,
+                sc.distance_km asc nulls last,
+                se.valid_hour_count desc nulls last,
                 sc.station_id asc
         ) as selection_rank
     from link.station_candidate sc
@@ -214,7 +214,7 @@ select
     case when b.station_id is null then 'blocked' else 'provisional' end as selection_status,
     case
         when b.station_id is null then 'No candidate station currently has provisional station ECWT under the loaded weather set.'
-        else 'Selected candidate station with largest valid DJF hour count among provisional station ECWT results; ties use distance and original candidate rank.'
+        else 'Selected lowest-rank candidate station among provisional station ECWT results; ties use distance, loaded valid DJF hours, and station id.'
     end as decision_basis,
     null as reviewer,
     case
@@ -243,8 +243,8 @@ select
     b.station_id,
     b.segment_start_utc,
     b.segment_end_utc,
-    'provisional_best_loaded_candidate',
-    'Selected from loaded station ECWT candidates by valid-hour count, distance, and candidate rank.'
+    'provisional_ranked_representative_candidate',
+    'Selected from loaded station ECWT candidates by candidate rank, distance, valid-hour count, and station id.'
 from tmp_best_plant_station b
 on conflict (station_selection_segment_id) do update set
     station_id = excluded.station_id,
@@ -391,7 +391,7 @@ def render_report(
             "## Interpretation",
             "",
             "- These are provisional plant-level ECWT values from the currently loaded canonical weather set.",
-            "- Selection chooses one currently usable candidate station per plant using valid-hour count, distance, and candidate rank.",
+            "- Selection chooses one currently usable candidate station per plant using candidate rank and distance before loaded valid-hour count.",
             "- Results are blocked where no candidate station currently has provisional station ECWT.",
             "- These rows are not final compliance publication values until NOAA coverage, source QA, and station-selection review are complete.",
             "",

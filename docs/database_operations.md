@@ -113,7 +113,7 @@ This populates `calc.station_ecwt` with provisional station-level ECWT values fr
   --station-ecwt-run-id station_ecwt_loaded_20260623T232301Z
 ```
 
-This populates `link.station_selection`, `link.station_selection_segment`, and `calc.plant_ecwt` for every plant. Selection is provisional: for each plant, the builder chooses the candidate station with provisional station ECWT and the largest loaded valid-hour count, then uses distance and original candidate rank as tie-breakers.
+This populates `link.station_selection`, `link.station_selection_segment`, and `calc.plant_ecwt` for every plant. Selection is provisional: for each plant, the builder chooses the lowest-rank candidate station with provisional station ECWT, using distance, loaded valid-hour count, and station id only as tie-breakers. Weather coverage affects publication readiness, not the representative-station choice.
 
 ## Build Plant ECWT Readiness Gates
 
