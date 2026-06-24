@@ -195,8 +195,8 @@ def apply_reclassification(
               select 1
               from weather.noaa_raw_download_attempt attempt
               where attempt.manifest_id = manifest.manifest_id
-                and attempt.download_status = 'missing_on_aws'
                 and attempt.http_status = 404
+                and attempt.download_status in ('missing_on_aws', 'failed_http')
           )
         returning 1
     )
