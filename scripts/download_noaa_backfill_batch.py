@@ -841,6 +841,14 @@ def render_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def download_report_path(project_root: Path, batch_number: int, run_id: str) -> Path:
+    docs_dir = project_root / "docs"
+    canonical_path = docs_dir / f"noaa_backfill_download_batch{batch_number}_report.md"
+    if canonical_path.exists():
+        return docs_dir / f"{run_id}_report.md"
+    return canonical_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
@@ -960,7 +968,7 @@ def main() -> int:
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user) + ["-f", str(sql_path)])
 
     db_counts = report_counts(args.psql, args.host, args.port, args.dbname, args.user, run_id, manifest_run_id, args.batch_number)
-    report_path = args.project_root / "docs" / f"noaa_backfill_download_batch{args.batch_number}_report.md"
+    report_path = download_report_path(args.project_root, args.batch_number, run_id)
     render_report(
         report_path,
         run_id,
