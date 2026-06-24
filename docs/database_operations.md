@@ -121,9 +121,11 @@ This populates `link.station_selection`, `link.station_selection_segment`, and `
 /Users/Shared/EOP012/rebuild/scripts/build_plant_ecwt_readiness.py \
   --plant-ecwt-run-id plant_ecwt_provisional_20260623T232311Z \
   --min-valid-hours 2000 \
-  --min-coverage-ratio 0.95
+  --min-coverage-ratio 0.95 \
+  --coverage-min-year 2000 \
+  --coverage-max-year 2025
 ```
 
-This populates `calc.plant_ecwt_readiness`. The strict gate above is the current publication-readiness gate. Diagnostic gates may be run with lower coverage thresholds to understand near-term progress, but those rows should not be treated as publication-ready compliance output.
+This populates `calc.plant_ecwt_readiness`. The strict gate above is the current publication-readiness gate. Coverage ratios use fixed selected-station active-period DJF expected hours for the configured year range, not only station-year files that happen to be loaded already. Diagnostic gates may be run with lower coverage thresholds to understand near-term progress, but those rows should not be treated as publication-ready compliance output.
 
 The readiness builder takes a transaction-scoped PostgreSQL advisory lock so concurrent strict and diagnostic runs serialize instead of deadlocking on shared audit/readiness writes. Prefer running readiness gates one at a time when operating manually.

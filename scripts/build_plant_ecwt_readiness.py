@@ -101,13 +101,18 @@ def build_sql(
     code_commit: str,
     min_valid_hours: int,
     min_coverage_ratio: float,
+    coverage_min_year: int,
+    coverage_max_year: int,
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
     params = {
         "plant_ecwt_run_id": plant_ecwt_run_id,
         "min_valid_hours": min_valid_hours,
         "min_coverage_ratio": min_coverage_ratio,
-        "readiness_rule": "publication_candidate requires provisional plant ECWT, valid hours >= threshold, and coverage ratio >= threshold",
+        "coverage_denominator": "fixed selected-station active-period DJF hours",
+        "coverage_min_year": coverage_min_year,
+        "coverage_max_year": coverage_max_year,
+        "readiness_rule": "publication_candidate requires provisional plant ECWT, valid hours >= threshold, fixed expected hours > 0, and coverage ratio >= threshold",
     }
     return f"""
 \\set ON_ERROR_STOP on
@@ -164,6 +169,89 @@ on conflict (calculation_run_id) do update set
     parameters_json = excluded.parameters_json,
     notes = excluded.notes;
 
+with plant_rows as (
+    select
+        pe.plant_ecwt_id,
+        pe.plant_id,
+        seg.station_id as selected_station_id,
+        pe.valid_hour_count,
+        pe.expected_hour_count as loaded_expected_hour_count,
+        pe.result_status
+    from calc.plant_ecwt pe
+    left join link.station_selection_segment seg
+      on seg.station_selection_id = pe.station_selection_id
+    where pe.calculation_run_id = {sql_literal(plant_ecwt_run_id)}
+),
+years as (
+    select generate_series({coverage_min_year}, {coverage_max_year})::integer as source_year
+),
+djf_segments as (
+    select
+        make_timestamptz(source_year, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+        make_timestamptz(source_year, 3, 1, 0, 0, 0, 'UTC') as segment_end_utc
+    from years
+    union all
+    select
+        make_timestamptz(source_year, 12, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+        make_timestamptz(source_year + 1, 1, 1, 0, 0, 0, 'UTC') as segment_end_utc
+    from years
+),
+selected_stations as (
+    select distinct selected_station_id as station_id
+    from plant_rows
+    where selected_station_id is not null
+),
+station_expected as (
+    select
+        ss.station_id,
+        round(
+            coalesce(
+                sum(
+                    case
+                        when least(
+                            ds.segment_end_utc,
+                            coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                        ) > greatest(
+                            ds.segment_start_utc,
+                            coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                        )
+                        then extract(
+                            epoch from (
+                                least(
+                                    ds.segment_end_utc,
+                                    coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                                ) - greatest(
+                                    ds.segment_start_utc,
+                                    coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                                )
+                            )
+                        ) / 3600.0
+                        else 0
+                    end
+                ),
+                0
+            )
+        )::bigint as expected_hour_count
+    from selected_stations ss
+    join weather.station st using (station_id)
+    cross join djf_segments ds
+    group by ss.station_id
+),
+readiness_source as (
+    select
+        pr.plant_ecwt_id,
+        pr.plant_id,
+        pr.selected_station_id,
+        pr.valid_hour_count,
+        case
+            when pr.result_status = 'blocked' then 0::bigint
+            else coalesce(nullif(se.expected_hour_count, 0), pr.loaded_expected_hour_count, 0)::bigint
+        end as expected_hour_count,
+        pr.result_status
+    from plant_rows pr
+    left join station_expected se
+      on se.station_id = pr.selected_station_id
+)
 insert into calc.plant_ecwt_readiness (
     plant_ecwt_readiness_id,
     plant_ecwt_id,
@@ -181,35 +269,34 @@ insert into calc.plant_ecwt_readiness (
     notes
 )
 select
-    {sql_literal(run_id)} || ':plant:' || pe.plant_id as plant_ecwt_readiness_id,
-    pe.plant_ecwt_id,
-    pe.plant_id,
+    {sql_literal(run_id)} || ':plant:' || rs.plant_id as plant_ecwt_readiness_id,
+    rs.plant_ecwt_id,
+    rs.plant_id,
     {sql_literal(run_id)} as calculation_run_id,
     {sql_literal(METHODOLOGY_VERSION)} as methodology_version,
-    seg.station_id as selected_station_id,
-    pe.valid_hour_count,
-    pe.expected_hour_count,
-    (pe.valid_hour_count::numeric / nullif(pe.expected_hour_count, 0)) as coverage_ratio,
+    rs.selected_station_id,
+    rs.valid_hour_count,
+    rs.expected_hour_count,
+    (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) as coverage_ratio,
     {min_valid_hours}::bigint as min_valid_hour_threshold,
     {min_coverage_ratio}::numeric as min_coverage_ratio_threshold,
     case
-        when pe.result_status = 'blocked' then 'blocked'
-        when pe.valid_hour_count >= {min_valid_hours}
-         and (pe.valid_hour_count::numeric / nullif(pe.expected_hour_count, 0)) >= {min_coverage_ratio}
+        when rs.result_status = 'blocked' then 'blocked'
+        when rs.expected_hour_count = 0 then 'provisional_low_coverage'
+        when rs.valid_hour_count >= {min_valid_hours}
+         and (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) >= {min_coverage_ratio}
             then 'publication_candidate'
         else 'provisional_low_coverage'
     end as readiness_status,
     case
-        when pe.result_status = 'blocked' then 'no_candidate_station_with_provisional_ecwt'
-        when pe.valid_hour_count < {min_valid_hours} then 'valid_hours_below_threshold'
-        when (pe.valid_hour_count::numeric / nullif(pe.expected_hour_count, 0)) < {min_coverage_ratio} then 'coverage_ratio_below_threshold'
+        when rs.result_status = 'blocked' then 'no_candidate_station_with_provisional_ecwt'
+        when rs.expected_hour_count = 0 then 'expected_hours_unavailable'
+        when rs.valid_hour_count < {min_valid_hours} then 'valid_hours_below_threshold'
+        when (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) < {min_coverage_ratio} then 'coverage_ratio_below_threshold'
         else 'passes_current_publication_gate'
     end as reason_code,
-    'Readiness classification for provisional plant ECWT. Thresholds are conservative working gates and may change before publication.' as notes
-from calc.plant_ecwt pe
-left join link.station_selection_segment seg
-  on seg.station_selection_id = pe.station_selection_id
-where pe.calculation_run_id = {sql_literal(plant_ecwt_run_id)}
+    'Readiness classification for provisional plant ECWT using fixed selected-station active-period DJF expected hours. Thresholds are conservative working gates and may change before publication.' as notes
+from readiness_source rs
 on conflict (plant_ecwt_readiness_id) do update set
     selected_station_id = excluded.selected_station_id,
     valid_hour_count = excluded.valid_hour_count,
@@ -249,6 +336,8 @@ def render_report(
     code_commit: str,
     min_valid_hours: int,
     min_coverage_ratio: float,
+    coverage_min_year: int,
+    coverage_max_year: int,
     db_counts: OrderedDict[str, str],
     by_reason: list[dict[str, str]],
     host: str,
@@ -274,6 +363,8 @@ def render_report(
         f"- Code commit: `{code_commit}`",
         f"- Minimum valid hours: `{min_valid_hours}`",
         f"- Minimum coverage ratio: `{min_coverage_ratio}`",
+        f"- Coverage denominator: `fixed selected-station active-period DJF hours`",
+        f"- Coverage year range: `{coverage_min_year}-{coverage_max_year}`",
         "",
         "## Summary",
         "",
@@ -291,6 +382,7 @@ def render_report(
             "## Interpretation",
             "",
             "- This is a working publication-readiness gate for provisional plant ECWT rows.",
+            "- Coverage ratios use a fixed selected-station active-period DJF denominator, not only currently loaded station-year files.",
             "- `publication_candidate` is not the same as final accepted compliance output; it means the row passes the current coverage thresholds.",
             "- Rows that fail this gate should stay out of a published compliance dataset until more weather coverage or manual review is available.",
             "",
@@ -310,6 +402,8 @@ def main() -> int:
     parser.add_argument("--plant-ecwt-run-id", default=None)
     parser.add_argument("--min-valid-hours", type=int, default=2000)
     parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
+    parser.add_argument("--coverage-min-year", type=int, default=2000)
+    parser.add_argument("--coverage-max-year", type=int, default=2025)
     args = parser.parse_args()
 
     plant_ecwt_run_id = args.plant_ecwt_run_id or latest_plant_ecwt_run_id(
@@ -319,7 +413,15 @@ def main() -> int:
     run_id = f"plant_ecwt_readiness_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     run(
         psql_cmd(args.psql, args.host, args.port, args.dbname, args.user),
-        input_text=build_sql(run_id, plant_ecwt_run_id, code_commit, args.min_valid_hours, args.min_coverage_ratio),
+        input_text=build_sql(
+            run_id,
+            plant_ecwt_run_id,
+            code_commit,
+            args.min_valid_hours,
+            args.min_coverage_ratio,
+            args.coverage_min_year,
+            args.coverage_max_year,
+        ),
     )
 
     db_counts = report_counts(args.psql, args.host, args.port, args.dbname, run_id, args.user)
@@ -345,6 +447,8 @@ def main() -> int:
         code_commit,
         args.min_valid_hours,
         args.min_coverage_ratio,
+        args.coverage_min_year,
+        args.coverage_max_year,
         db_counts,
         by_reason,
         args.host,

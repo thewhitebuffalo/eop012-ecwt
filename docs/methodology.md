@@ -143,6 +143,8 @@ Missing-data treatment must be explicit:
 
 The project should publish both the ECWT result and the coverage evidence used to judge that result.
 
+Publication-readiness coverage ratios should use a fixed selected-station active-period DJF denominator for the ECWT calculation window. They should not use only station-years that happen to have been loaded already, because that denominator grows during backfill and can make readiness counts move for bookkeeping reasons rather than real coverage gains.
+
 ## ECWT Calculation
 
 For each selected plant or station series:
