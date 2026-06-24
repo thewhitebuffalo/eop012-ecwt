@@ -647,44 +647,63 @@ on conflict (station_id, source_year, local_path) do update set
     )
 
 
-def report_counts(psql: Path, host: str, port: int, dbname: str, user: str | None, run_id: str) -> OrderedDict[str, str]:
-    queries = OrderedDict(
-        [
-            ("weather.hourly_djf total", "select count(*) from weather.hourly_djf;"),
-            (
-                "weather.hourly_djf rows for this run",
-                f"select count(*) from weather.hourly_djf where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            (
-                "loaded files for this run",
-                f"select count(*) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)} and file_status = 'loaded';",
-            ),
-            (
-                "failed files for this run",
-                f"select count(*) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)} and file_status = 'failed';",
-            ),
-            (
-                "loaded hour count for this run",
-                f"select coalesce(sum(loaded_hour_count),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            (
-                "invalid temp rows for this run",
-                f"select coalesce(sum(invalid_temp_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            (
-                "rejected source rows for this run",
-                f"select coalesce(sum(rejected_source_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            (
-                "rejected plausibility rows for this run",
-                f"select coalesce(sum(rejected_plausibility_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            (
-                "duplicate hour count for this run",
-                f"select coalesce(sum(duplicate_hour_count),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
-            ),
-            ("audit.calculation_run", "select count(*) from audit.calculation_run;"),
-        ]
+def report_counts(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    run_id: str,
+    exact_db_counts: bool,
+) -> OrderedDict[str, str]:
+    queries = OrderedDict()
+    if exact_db_counts:
+        queries["weather.hourly_djf total"] = "select count(*) from weather.hourly_djf;"
+        queries["weather.hourly_djf rows for this run"] = (
+            f"select count(*) from weather.hourly_djf where calculation_run_id = {sql_literal(run_id)};"
+        )
+    else:
+        queries["weather.hourly_djf estimated total"] = (
+            "select coalesce(reltuples::bigint, 0) from pg_class where oid = 'weather.hourly_djf'::regclass;"
+        )
+        queries["weather.hourly_djf rows for this run (file audit)"] = (
+            f"select coalesce(sum(loaded_hour_count),0) from weather.noaa_hourly_load_file "
+            f"where calculation_run_id = {sql_literal(run_id)};"
+        )
+    queries.update(
+        OrderedDict(
+            [
+                (
+                    "loaded files for this run",
+                    f"select count(*) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)} and file_status = 'loaded';",
+                ),
+                (
+                    "failed files for this run",
+                    f"select count(*) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)} and file_status = 'failed';",
+                ),
+                (
+                    "loaded hour count for this run",
+                    f"select coalesce(sum(loaded_hour_count),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+                ),
+                (
+                    "invalid temp rows for this run",
+                    f"select coalesce(sum(invalid_temp_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+                ),
+                (
+                    "rejected source rows for this run",
+                    f"select coalesce(sum(rejected_source_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+                ),
+                (
+                    "rejected plausibility rows for this run",
+                    f"select coalesce(sum(rejected_plausibility_rows),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+                ),
+                (
+                    "duplicate hour count for this run",
+                    f"select coalesce(sum(duplicate_hour_count),0) from weather.noaa_hourly_load_file where calculation_run_id = {sql_literal(run_id)};",
+                ),
+                ("audit.calculation_run", "select count(*) from audit.calculation_run;"),
+            ]
+        )
     )
     results: OrderedDict[str, str] = OrderedDict()
     for label, query in queries.items():
@@ -800,6 +819,11 @@ def main() -> int:
     )
     parser.add_argument("--min-temp-c", type=float, default=-65.0)
     parser.add_argument("--max-temp-c", type=float, default=40.0)
+    parser.add_argument(
+        "--exact-db-counts",
+        action="store_true",
+        help="Run expensive exact weather.hourly_djf count(*) validations in the report.",
+    )
     args = parser.parse_args()
 
     if not args.psql.exists():
@@ -889,7 +913,15 @@ def main() -> int:
     sql_path.write_text(load_sql, encoding="utf-8")
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user) + ["-f", str(sql_path)])
 
-    db_counts = report_counts(args.psql, args.host, args.port, args.dbname, args.user, run_id)
+    db_counts = report_counts(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        run_id,
+        args.exact_db_counts,
+    )
     report_path = args.project_root / "docs" / f"{run_id}_report.md"
     render_report(
         report_path,
