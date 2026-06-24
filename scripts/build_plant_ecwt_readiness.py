@@ -173,89 +173,96 @@ on conflict (calculation_run_id) do update set
     parameters_json = excluded.parameters_json,
     notes = excluded.notes;
 
-with plant_rows as (
-    select
-        pe.plant_ecwt_id,
-        pe.plant_id,
-        seg.station_id as selected_station_id,
-        pe.valid_hour_count,
-        pe.expected_hour_count as loaded_expected_hour_count,
-        pe.result_status
-    from calc.plant_ecwt pe
-    left join link.station_selection_segment seg
-      on seg.station_selection_id = pe.station_selection_id
-    where pe.calculation_run_id = {sql_literal(plant_ecwt_run_id)}
-),
-years as (
+create temp table tmp_readiness_plant_rows on commit drop as
+select
+    pe.plant_ecwt_id,
+    pe.plant_id,
+    seg.station_id as selected_station_id,
+    pe.valid_hour_count,
+    pe.expected_hour_count as loaded_expected_hour_count,
+    pe.result_status
+from calc.plant_ecwt pe
+left join link.station_selection_segment seg
+  on seg.station_selection_id = pe.station_selection_id
+where pe.calculation_run_id = {sql_literal(plant_ecwt_run_id)};
+create index tmp_readiness_plant_rows_station_idx
+    on tmp_readiness_plant_rows (selected_station_id);
+analyze tmp_readiness_plant_rows;
+
+create temp table tmp_readiness_djf_segments on commit drop as
+with years as (
     select generate_series({coverage_min_year}, {coverage_max_year})::integer as source_year
-),
-djf_segments as (
-    select
-        make_timestamptz(source_year, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
-        make_timestamptz(source_year, 3, 1, 0, 0, 0, 'UTC') as segment_end_utc
-    from years
-    union all
-    select
-        make_timestamptz(source_year, 12, 1, 0, 0, 0, 'UTC') as segment_start_utc,
-        make_timestamptz(source_year + 1, 1, 1, 0, 0, 0, 'UTC') as segment_end_utc
-    from years
-),
-selected_stations as (
-    select distinct selected_station_id as station_id
-    from plant_rows
-    where selected_station_id is not null
-),
-station_expected as (
-    select
-        ss.station_id,
-        round(
-            coalesce(
-                sum(
-                    case
-                        when least(
-                            ds.segment_end_utc,
-                            coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
-                        ) > greatest(
-                            ds.segment_start_utc,
-                            coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
-                        )
-                        then extract(
-                            epoch from (
-                                least(
-                                    ds.segment_end_utc,
-                                    coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
-                                ) - greatest(
-                                    ds.segment_start_utc,
-                                    coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
-                                )
-                            )
-                        ) / 3600.0
-                        else 0
-                    end
-                ),
-                0
-            )
-        )::bigint as expected_hour_count
-    from selected_stations ss
-    join weather.station st using (station_id)
-    cross join djf_segments ds
-    group by ss.station_id
-),
-readiness_source as (
-    select
-        pr.plant_ecwt_id,
-        pr.plant_id,
-        pr.selected_station_id,
-        pr.valid_hour_count,
-        case
-            when pr.result_status = 'blocked' then 0::bigint
-            else coalesce(nullif(se.expected_hour_count, 0), pr.loaded_expected_hour_count, 0)::bigint
-        end as expected_hour_count,
-        pr.result_status
-    from plant_rows pr
-    left join station_expected se
-      on se.station_id = pr.selected_station_id
 )
+select
+    make_timestamptz(source_year, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+    make_timestamptz(source_year, 3, 1, 0, 0, 0, 'UTC') as segment_end_utc
+from years
+union all
+select
+    make_timestamptz(source_year, 12, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+    make_timestamptz(source_year + 1, 1, 1, 0, 0, 0, 'UTC') as segment_end_utc
+from years;
+analyze tmp_readiness_djf_segments;
+
+create temp table tmp_readiness_station_expected on commit drop as
+select
+    ss.station_id,
+    round(
+        coalesce(
+            sum(
+                case
+                    when least(
+                        ds.segment_end_utc,
+                        coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                    ) > greatest(
+                        ds.segment_start_utc,
+                        coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                    )
+                    then extract(
+                        epoch from (
+                            least(
+                                ds.segment_end_utc,
+                                coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                            ) - greatest(
+                                ds.segment_start_utc,
+                                coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                            )
+                        )
+                    ) / 3600.0
+                    else 0
+                end
+            ),
+            0
+        )
+    )::bigint as expected_hour_count
+from (
+    select distinct selected_station_id as station_id
+    from tmp_readiness_plant_rows
+    where selected_station_id is not null
+) ss
+join weather.station st using (station_id)
+cross join tmp_readiness_djf_segments ds
+group by ss.station_id;
+create unique index tmp_readiness_station_expected_station_idx
+    on tmp_readiness_station_expected (station_id);
+analyze tmp_readiness_station_expected;
+
+create temp table tmp_readiness_source on commit drop as
+select
+    pr.plant_ecwt_id,
+    pr.plant_id,
+    pr.selected_station_id,
+    pr.valid_hour_count,
+    case
+        when pr.result_status = 'blocked' then 0::bigint
+        else coalesce(nullif(se.expected_hour_count, 0), pr.loaded_expected_hour_count, 0)::bigint
+    end as expected_hour_count,
+    pr.result_status
+from tmp_readiness_plant_rows pr
+left join tmp_readiness_station_expected se
+  on se.station_id = pr.selected_station_id;
+analyze tmp_readiness_source;
+
 insert into calc.plant_ecwt_readiness (
     plant_ecwt_readiness_id,
     plant_ecwt_id,
@@ -300,7 +307,7 @@ select
         else 'passes_current_publication_gate'
     end as reason_code,
     'Readiness classification for provisional plant ECWT using fixed selected-station active-period DJF expected hours. Thresholds are conservative working gates and may change before publication.' as notes
-from readiness_source rs
+from tmp_readiness_source rs
 on conflict (plant_ecwt_readiness_id) do update set
     selected_station_id = excluded.selected_station_id,
     valid_hour_count = excluded.valid_hour_count,
