@@ -114,6 +114,10 @@ def build_sql(
 \\set ON_ERROR_STOP on
 begin;
 
+-- Serialize readiness writers. Parallel strict/diagnostic runs can otherwise
+-- deadlock while writing shared audit and readiness indexes.
+select pg_advisory_xact_lock(12012, 9510);
+
 create table if not exists calc.plant_ecwt_readiness (
     plant_ecwt_readiness_id text primary key,
     plant_ecwt_id text not null references calc.plant_ecwt(plant_ecwt_id),

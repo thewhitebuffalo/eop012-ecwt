@@ -123,3 +123,5 @@ This populates `link.station_selection`, `link.station_selection_segment`, and `
 ```
 
 This populates `calc.plant_ecwt_readiness`. The strict gate above is the current publication-readiness gate. Diagnostic gates may be run with lower coverage thresholds to understand near-term progress, but those rows should not be treated as publication-ready compliance output.
+
+The readiness builder takes a transaction-scoped PostgreSQL advisory lock so concurrent strict and diagnostic runs serialize instead of deadlocking on shared audit/readiness writes. Prefer running readiness gates one at a time when operating manually.
