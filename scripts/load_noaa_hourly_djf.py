@@ -793,9 +793,11 @@ def render_report(
             "- Multiple valid observations in the same station-hour are collapsed to one canonical hour using quality, report type, and closeness to minute 56.",
             "- The timestamp policy for this run is: canonical hour = NOAA observation timestamp floored to the UTC hour.",
             "- This is now a canonical-load candidate, but final compliance publication still depends on station selection and ECWT method validation.",
-            "",
         ]
     )
+    if not file_rows:
+        lines.append("- No candidate files were selected, so this run is an auditable no-op and loaded zero weather rows.")
+    lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -848,8 +850,6 @@ def main() -> int:
         candidate_files_query(args.source, args.limit_files, args.include_loaded),
         args.user,
     )
-    if not file_rows:
-        raise RuntimeError("No candidate NOAA files selected for DJF hourly loading.")
 
     hourly_rows: list[dict[str, object]] = []
     file_stats: list[dict[str, object]] = []
@@ -907,6 +907,7 @@ def main() -> int:
         "hourly_rows_staged": len(hourly_rows),
         "tmp_units": "NOAA TMP tenths of degrees C converted to C and F",
         "timestamp_policy": "canonical hour = NOAA observation timestamp floored to UTC hour",
+        "no_candidate_files_selected": not bool(file_rows),
     }
     load_sql = build_load_sql(staging_dir, run_id, code_commit, params)
     sql_path = staging_dir / "load.sql"
