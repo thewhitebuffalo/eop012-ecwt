@@ -19,12 +19,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from eop012_config import EIA860_ZIP, PROJECT_ROOT, PSQL, STAGING_ROOT
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-RAW_ZIP = Path("/Users/Shared/EOP012/EIA_860_raw_downloads/intake/eia8602024.zip")
+RAW_ZIP = EIA860_ZIP
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "eia8602024"
-STAGING_ROOT = Path("/Volumes/NOAA_CACHE/EOP012/staging")
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_YEAR = 2024

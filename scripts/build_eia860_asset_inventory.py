@@ -22,9 +22,10 @@ from typing import Iterable
 
 import openpyxl
 
+from eop012_config import EIA860_ZIP, PROJECT_ROOT
 
-DEFAULT_ZIP = Path("/Users/Shared/EOP012/EIA_860_raw_downloads/intake/eia8602024.zip")
-DEFAULT_PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
+DEFAULT_ZIP = EIA860_ZIP
+DEFAULT_PROJECT_ROOT = PROJECT_ROOT
 
 
 def sha256_file(path: Path) -> str:

@@ -52,6 +52,34 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+## Configure Local Paths
+
+The repository does not commit raw source files, NOAA hourly weather caches, or
+database clusters. Copy the example environment file and edit it for your
+machine:
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+```
+
+The scripts use these environment variables as defaults, and command-line flags
+still take precedence for one-off runs.
+
+| Variable | Purpose |
+| --- | --- |
+| `EOP012_PROJECT_ROOT` | Local clone of this repository. |
+| `EOP012_DATA_ROOT` | External working-data root for raw files, staging files, logs, and local database clusters. |
+| `EOP012_EIA860_ZIP` | EIA-860 2024 final ZIP downloaded from EIA. |
+| `EOP012_STAGING_ROOT` | Generated CSV staging directory used before database loads. |
+| `EOP012_NOAA_GLOBAL_HOURLY_ROOT` | NOAA Global Hourly raw CSV/GZ cache. |
+| `EOP012_NOAA_RAW_ROOTS` | Optional colon-separated list of NOAA raw roots for inventory scans. |
+| `EOP012_STATION_HISTORY_CSV` | NOAA ISD station-history CSV cache path. |
+| `EOP012_SOURCE_CLUSTER_PATH` | Optional legacy/source Postgres cluster used by coverage-audit bridge scripts. |
+| `EOP012_PSQL` | PostgreSQL `psql` client binary; use an absolute path if it is not on `PATH`. |
+
 ## Choose A Local Data Root
 
 Use an external drive if available. The current asset-only build is small, but future NOAA hourly data will be large.

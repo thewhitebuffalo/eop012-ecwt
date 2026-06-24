@@ -20,11 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-DEFAULT_DATA_ROOT = Path("/Volumes/NOAA_CACHE/EOP012")
-DEFAULT_STAGING_ROOT = DEFAULT_DATA_ROOT / "staging"
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
+DEFAULT_STAGING_ROOT = STAGING_ROOT
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_global_hourly_csv"

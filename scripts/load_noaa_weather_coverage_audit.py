@@ -21,12 +21,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
+from eop012_config import PROJECT_ROOT, PSQL, SOURCE_CLUSTER_PATH, STAGING_ROOT
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-DEFAULT_DATA_ROOT = Path("/Volumes/NOAA_CACHE/EOP012")
-DEFAULT_STAGING_ROOT = DEFAULT_DATA_ROOT / "staging"
-DEFAULT_SOURCE_CLUSTER_PATH = Path("/Volumes/NOAA_CACHE/postgres16_weather_build_5435")
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
+DEFAULT_STAGING_ROOT = STAGING_ROOT
+DEFAULT_SOURCE_CLUSTER_PATH = SOURCE_CLUSTER_PATH
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "legacy_noaa_station_sample_hour_coverage"

@@ -12,9 +12,8 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from eop012_config import PROJECT_ROOT, PSQL
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 
 

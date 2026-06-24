@@ -9,11 +9,32 @@ Goal: calculate a documented Extreme Cold Weather Temperature (ECWT) for U.S. ge
 3. Keep raw source files immutable.
 4. Store all source provenance, station-selection decisions, coverage checks, and calculation outputs explicitly.
 
+## Local Configuration
+
+Scripts can run from any clone path. Defaults come from environment variables in
+`.env.example`, and every important path also has a command-line override.
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+```
+
+Key paths:
+
+- `EOP012_PROJECT_ROOT`: local repository clone.
+- `EOP012_DATA_ROOT`: external working-data root for raw files, staging files, and local database clusters.
+- `EOP012_EIA860_ZIP`: EIA-860 2024 final ZIP.
+- `EOP012_STAGING_ROOT`: generated CSV staging directory.
+- `EOP012_NOAA_GLOBAL_HOURLY_ROOT`: NOAA Global Hourly raw-file cache.
+- `EOP012_PSQL`: PostgreSQL `psql` client binary.
+
 ## Immediate Baseline
 
-The first baseline is EIA-860 2024 final annual data:
+The first baseline is EIA-860 2024 final annual data. By default scripts look at:
 
-`/Users/Shared/EOP012/EIA_860_raw_downloads/intake/eia8602024.zip`
+`$EOP012_EIA860_ZIP`
 
 The 2025 early release is available for comparison/currentness but should remain provisional until EIA publishes final 2025 data.
 
@@ -28,7 +49,7 @@ The 2025 early release is available for comparison/currentness but should remain
 GitHub is the audit/control plane for this project, not the heavy weather-data warehouse.
 
 - Commit code, schemas, methodology, manifests, checksums, QA reports, and small previews.
-- Keep heavyweight NOAA hourly data and working databases on `/Volumes/NOAA_CACHE`.
+- Keep heavyweight NOAA hourly data and working databases under `EOP012_DATA_ROOT` or another external cache.
 - Publish versioned release bundles with checksums and enough provenance to reproduce every ECWT value.
 - Never commit large raw ZIPs, Postgres clusters, DuckDB files, Parquet bundles, or generated data directories directly to Git.
 

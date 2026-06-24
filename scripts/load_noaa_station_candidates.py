@@ -19,13 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT, STATION_HISTORY_CSV
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-DEFAULT_DATA_ROOT = Path("/Volumes/NOAA_CACHE/EOP012")
 DEFAULT_STATION_HISTORY_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv"
-DEFAULT_STATION_HISTORY_CSV = DEFAULT_DATA_ROOT / "raw" / "noaa" / "isd-history.csv"
-DEFAULT_STAGING_ROOT = DEFAULT_DATA_ROOT / "staging"
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
+DEFAULT_STATION_HISTORY_CSV = STATION_HISTORY_CSV
+DEFAULT_STAGING_ROOT = STAGING_ROOT
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_isd_station_history"

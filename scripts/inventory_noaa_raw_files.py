@@ -15,20 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from eop012_config import NOAA_RAW_ROOTS, PROJECT_ROOT, PSQL, STAGING_ROOT
 
-PROJECT_ROOT = Path("/Users/Shared/EOP012/rebuild")
-DEFAULT_DATA_ROOT = Path("/Volumes/NOAA_CACHE/EOP012")
-DEFAULT_STAGING_ROOT = DEFAULT_DATA_ROOT / "staging"
-PSQL = Path("/opt/homebrew/opt/postgresql@16/bin/psql")
+DEFAULT_STAGING_ROOT = STAGING_ROOT
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_global_hourly_local_raw_inventory"
-DEFAULT_RAW_ROOTS = [
-    Path("/Volumes/NOAA_CACHE/noaa-global-hourly-pds-full"),
-    Path("/Volumes/NOAA_CACHE/noaa-global-hourly-year-staging"),
-    Path("/Volumes/NOAA_CACHE/noaa-global-hourly-unified"),
-    Path("/Volumes/NOAA_CACHE/BACKUP_TO_DELETE_LATER_noaa-cache_2026-02-19"),
-]
+DEFAULT_RAW_ROOTS = NOAA_RAW_ROOTS
 
 
 def utc_now() -> datetime:
