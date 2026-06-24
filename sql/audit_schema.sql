@@ -371,6 +371,8 @@ create table if not exists link.station_selection_segment (
     constraint station_selection_segment_dates
         check (segment_end_utc >= segment_start_utc)
 );
+create index if not exists ix_station_selection_segment_selection
+    on link.station_selection_segment (station_selection_id);
 
 create table if not exists calc.station_ecwt (
     station_ecwt_id text primary key,
@@ -417,6 +419,8 @@ create table if not exists calc.plant_ecwt (
     constraint plant_ecwt_result_status_check
         check (result_status in ('accepted', 'provisional', 'blocked', 'superseded'))
 );
+create index if not exists ix_plant_ecwt_run_selection
+    on calc.plant_ecwt (calculation_run_id, station_selection_id);
 
 create table if not exists calc.generator_ecwt (
     generator_ecwt_id text primary key,

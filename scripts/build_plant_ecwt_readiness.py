@@ -143,6 +143,10 @@ create table if not exists calc.plant_ecwt_readiness (
 );
 create index if not exists ix_plant_ecwt_readiness_run_status
     on calc.plant_ecwt_readiness (calculation_run_id, readiness_status);
+create index if not exists ix_station_selection_segment_selection
+    on link.station_selection_segment (station_selection_id);
+create index if not exists ix_plant_ecwt_run_selection
+    on calc.plant_ecwt (calculation_run_id, station_selection_id);
 
 insert into audit.calculation_run (
     calculation_run_id,
