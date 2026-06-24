@@ -420,6 +420,8 @@ Rows are prioritized by missing whole years first, newer years first, and candid
 
 This step consumes one manifest batch and records every attempt. Files are written through temporary `.part` files and moved into place only after a complete stream. Existing target files are not overwritten unless `--overwrite` is explicitly supplied.
 
+NOAA HTTP 404 responses are recorded as `missing_on_aws` attempt rows and `missing` manifest rows. That means the public AWS object for the candidate station-year was not present; it is not evidence of a corrupt local download. Non-404 HTTP failures remain `failed_http` for separate retry handling.
+
 ```bash
 python "$REPO/scripts/download_noaa_backfill_batch.py" \
   --project-root "$REPO" \
@@ -438,6 +440,17 @@ Expected outputs:
 docs/noaa_backfill_download_batch1_report.md
 weather.noaa_raw_download_attempt
 audit.source_file rows for successful or pre-existing files
+```
+
+If an older local database has historical 404 rows stored as generic `failed_http` / `failed`, normalize those statuses before interpreting backfill failure rates:
+
+```bash
+python "$REPO/scripts/reclassify_noaa_404_missing.py" \
+  --project-root "$REPO" \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 \
+  --port 5436 \
+  --dbname eop012
 ```
 
 ## Stop Postgres

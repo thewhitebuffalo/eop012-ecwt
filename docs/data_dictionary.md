@@ -173,7 +173,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `station_candidate_plant_links` | integer | Number of candidate plant links for the station. |
 | `source_year_available_count` | integer | Available station-year files found in the source year during inventory. |
 | `source_year_missing_count` | integer | Missing station-year files found in the source year during inventory. |
-| `manifest_status` | text | `planned`, `downloaded`, `skipped`, or `failed`. |
+| `manifest_status` | text | `planned`, `downloaded`, `skipped`, `missing`, or `failed`. `missing` means NOAA returned HTTP 404 for the planned public AWS object. |
 | `priority_reason` | text | Machine-readable priority explanation. |
 | `notes` | text | Manifest caveat or status note. |
 
@@ -193,7 +193,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `attempted_at_utc` | timestamptz | Attempt start timestamp. |
 | `finished_at_utc` | timestamptz | Attempt finish timestamp. |
 | `http_status` | integer | HTTP status returned by the source when available. |
-| `download_status` | text | `downloaded`, `skipped_existing`, `failed_http`, `failed_exception`, or `dry_run`. |
+| `download_status` | text | `downloaded`, `skipped_existing`, `missing_on_aws`, `failed_http`, `failed_exception`, or `dry_run`. `missing_on_aws` is a terminal NOAA HTTP 404 outcome; `failed_http` is reserved for non-404 HTTP errors that may be retried. |
 | `file_size_bytes` | bigint | Downloaded or observed file size. |
 | `file_sha256` | text | SHA-256 of downloaded or observed file. |
 | `source_file_id` | text | `audit.source_file` row for successful or pre-existing files. |

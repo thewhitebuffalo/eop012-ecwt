@@ -317,7 +317,7 @@ create table if not exists weather.noaa_raw_backfill_manifest (
     created_at_utc timestamptz not null default now(),
     unique (inventory_run_id, station_id, source_year, calculation_run_id),
     constraint noaa_raw_backfill_manifest_status_check
-        check (manifest_status in ('planned', 'downloaded', 'skipped', 'failed'))
+        check (manifest_status in ('planned', 'downloaded', 'skipped', 'missing', 'failed'))
 );
 """,
             """

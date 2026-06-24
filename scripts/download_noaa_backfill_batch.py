@@ -27,6 +27,8 @@ DEFAULT_STAGING_ROOT = STAGING_ROOT
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 SOURCE_FAMILY = "noaa_global_hourly_csv"
 USER_AGENT = "eop012-ecwt-audit/0.1"
+DOWNLOAD_STATUS_VALUES = ("downloaded", "skipped_existing", "missing_on_aws", "failed_http", "failed_exception", "dry_run")
+MANIFEST_STATUS_VALUES = ("planned", "downloaded", "skipped", "missing", "failed")
 
 
 def utc_now() -> datetime:
@@ -280,13 +282,19 @@ def download_one(row: dict[str, str], run_id: str, overwrite: bool, timeout: int
         return attempt, source_row
     except urllib.error.HTTPError as exc:
         cleanup_part(target_path)
+        if exc.code == 404:
+            download_status = "missing_on_aws"
+            notes = "NOAA public AWS endpoint returned HTTP 404 Not Found; terminal missing object, not a corrupt download."
+        else:
+            download_status = "failed_http"
+            notes = "HTTP error from NOAA public endpoint; non-404 errors should remain retry candidates."
         attempt.update(
             {
                 "http_status": exc.code,
-                "download_status": "failed_http",
+                "download_status": download_status,
                 "finished_at_utc": utc_now().isoformat(timespec="seconds"),
                 "error_message": str(exc)[:2000],
-                "notes": "HTTP error from NOAA public endpoint.",
+                "notes": notes,
             }
         )
         return attempt, None
@@ -475,6 +483,8 @@ on conflict (source_file_id) do update set
 """,
             ]
         )
+    download_status_sql = ", ".join(sql_literal(status) for status in DOWNLOAD_STATUS_VALUES)
+    manifest_status_sql = ", ".join(sql_literal(status) for status in MANIFEST_STATUS_VALUES)
     return "\n".join(
         [
             "\\set ON_ERROR_STOP on",
@@ -502,10 +512,23 @@ create table if not exists weather.noaa_raw_download_attempt (
     created_at_utc timestamptz not null default now(),
     unique (manifest_id, calculation_run_id),
     constraint noaa_raw_download_attempt_status_check
-        check (download_status in ('downloaded', 'skipped_existing', 'failed_http', 'failed_exception', 'dry_run')),
+        check (download_status in ('downloaded', 'skipped_existing', 'missing_on_aws', 'failed_http', 'failed_exception', 'dry_run')),
     constraint noaa_raw_download_attempt_sha256_len
         check (file_sha256 is null or length(file_sha256) = 64)
 );
+""",
+            f"""
+alter table weather.noaa_raw_download_attempt
+    drop constraint if exists noaa_raw_download_attempt_status_check;
+alter table weather.noaa_raw_download_attempt
+    add constraint noaa_raw_download_attempt_status_check
+    check (download_status in ({download_status_sql}));
+
+alter table weather.noaa_raw_backfill_manifest
+    drop constraint if exists noaa_raw_backfill_manifest_status_check;
+alter table weather.noaa_raw_backfill_manifest
+    add constraint noaa_raw_backfill_manifest_status_check
+    check (manifest_status in ({manifest_status_sql}));
 """,
             """
 create index if not exists ix_noaa_raw_download_attempt_status
@@ -630,6 +653,7 @@ on conflict (manifest_id, calculation_run_id) do update set
 update weather.noaa_raw_backfill_manifest manifest
 set manifest_status = case
     when attempt.download_status in ('downloaded', 'skipped_existing') then 'downloaded'
+    when attempt.download_status = 'missing_on_aws' then 'missing'
     when attempt.download_status = 'dry_run' then manifest.manifest_status
     when attempt.download_status in ('failed_http', 'failed_exception') then 'failed'
     else manifest.manifest_status
@@ -667,6 +691,10 @@ def report_counts(
             (
                 "skipped_existing",
                 f"select count(*) from weather.noaa_raw_download_attempt where calculation_run_id = {sql_literal(run_id)} and download_status = 'skipped_existing';",
+            ),
+            (
+                "missing_on_aws",
+                f"select count(*) from weather.noaa_raw_download_attempt where calculation_run_id = {sql_literal(run_id)} and download_status = 'missing_on_aws';",
             ),
             (
                 "failed_http",
@@ -711,6 +739,7 @@ def render_report(
 ) -> None:
     status_counts = Counter(str(attempt["download_status"]) for attempt in attempts)
     total_bytes = sum(int(attempt["file_size_bytes"] or 0) for attempt in attempts)
+    missing = [attempt for attempt in attempts if attempt["download_status"] == "missing_on_aws"]
     failures = [attempt for attempt in attempts if str(attempt["download_status"]).startswith("failed")]
     lines = [
         "# NOAA Backfill Batch Download Report",
@@ -756,6 +785,27 @@ def render_report(
     lines.extend(
         [
             "",
+            "## Missing On AWS Sample",
+            "",
+        ]
+    )
+    if not missing:
+        lines.append("No HTTP 404 missing-object outcomes recorded.")
+    else:
+        lines.extend(["| Status | HTTP | Station | Year | URL | Error |", "| --- | ---: | --- | ---: | --- | --- |"])
+        for attempt in missing[:20]:
+            lines.append(
+                "| "
+                f"`{attempt['download_status']}` | "
+                f"{attempt['http_status'] or ''} | "
+                f"`{attempt['station_id']}` | "
+                f"{attempt['source_year']} | "
+                f"`{attempt['download_url']}` | "
+                f"{str(attempt['error_message'] or '')[:160]} |"
+            )
+    lines.extend(
+        [
+            "",
             "## Failure Sample",
             "",
         ]
@@ -782,6 +832,9 @@ def render_report(
             "- Files are written through temporary `.part` files and moved into place only after the stream completes.",
             "- Existing files are not overwritten unless `--overwrite` is explicitly supplied.",
             "- Successful downloads are hashed with SHA-256 and registered in `audit.source_file`.",
+            "- `missing_on_aws` means the NOAA public AWS endpoint returned HTTP 404 for that station-year object; this is treated as a terminal missing source object, not a corrupted local file.",
+            "- `failed_http` is reserved for non-404 HTTP errors such as 500 or 503 and should remain retryable.",
+            "- `failed_exception` indicates a local or network exception and should be investigated before retrying.",
             "",
         ]
     )
