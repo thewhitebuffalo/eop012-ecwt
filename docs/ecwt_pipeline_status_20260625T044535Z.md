@@ -219,6 +219,24 @@ gate under the current candidate table. The near-threshold path therefore points
 to station-candidate expansion, invalid-`TMP` methodology policy, or coverage
 gate policy, not a simple second-candidate switch.
 
+The station-candidate expansion path is now quantified in
+`expanded_candidate_coverage_scenario_20260625T064545Z_report.md`, with plant
+detail in `expanded_candidate_coverage_scenario_20260625T064545Z_plants.csv`,
+radius summaries in `expanded_candidate_coverage_scenario_20260625T064545Z_radius_summary.csv`,
+and state summaries in `expanded_candidate_coverage_scenario_20260625T064545Z_state_summary.csv`.
+The same scenario is loaded in Postgres under
+`calc.expanded_candidate_coverage_scenario_plant`,
+`calc.expanded_candidate_coverage_scenario_radius_summary`, and
+`calc.expanded_candidate_coverage_scenario_state_summary`. The scenario does
+not change `link.station_candidate` or plant ECWT results; it searches loaded
+stations with provisional station ECWT rows and requires normalized active-window
+coverage ratio and loaded-year ratio of at least `0.95`. For the 1,004
+near-threshold blockers, 995 have a passing station within 250 km, 1,000 within
+500 km, and 1,001 within 1,000 km. The median nearest passing station is rank 24
+among loaded stations, which explains why the current top-10 nearest-station
+candidate table misses this path. The 3 remaining no-pass rows are the Alaska
+plants Kake, Petersburg, and Wrangell.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.

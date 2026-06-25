@@ -326,6 +326,64 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `top_missing_years` | text | Compact year:hour list for the highest-missing station-years. |
 | `primary_root_cause` | text | Largest missing-hour reason bucket for the station. |
 
+## `calc.expanded_candidate_coverage_scenario_plant`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `scenario_run_id` | text | Expanded-candidate scenario run lineage. |
+| `priority_run_id` | text | Normalized active-window blocker priority run used as input. |
+| `coverage_run_id` | text | Station-year coverage run used to calculate candidate coverage metrics. |
+| `station_ecwt_run_id` | text | Station ECWT run used to require provisional ECWT availability. |
+| `plant_id` | text | Internal plant key. |
+| `eia_plant_code` | text | EIA plant code. |
+| `plant_name` | text | EIA plant name. |
+| `plant_state` | text | Plant state. |
+| `priority_rank` | integer | Rank from the normalized active-window blocker queue. |
+| `priority_bucket` | text | Near-threshold bucket such as `gap_le_24h` or `gap_le_168h`. |
+| `valid_hour_gap_to_threshold` | bigint | Additional valid DJF hours needed for the current selected station to reach the configured threshold. |
+| `current_station_id` | text | Current best selected candidate station in the blocker priority row. |
+| `current_distance_km` | numeric | Distance from plant to current station. |
+| `current_rank_order` | integer | Current station candidate rank from `link.station_candidate`. |
+| `current_normalized_coverage_ratio` | numeric | Current station normalized active-window coverage ratio. |
+| `current_normalized_loaded_year_ratio` | numeric | Current station normalized active-window loaded-year ratio. |
+| `search_radius_km` | numeric | Maximum expanded-search radius used by the scenario. |
+| `stations_searched_within_radius` | bigint | Loaded provisional-ECWT stations evaluated within the maximum radius. |
+| `passing_station_count_within_radius` | bigint | Evaluated stations within the maximum radius passing both coverage and loaded-year gates. |
+| `nearest_pass_radius_bucket_km` | numeric | Smallest configured radius bucket containing the nearest passing station. |
+| `nearest_pass_rank_order_within_radius` | integer | Rank of the nearest passing station among loaded stations sorted by plant distance. |
+| `nearest_pass_station_id` | text | Nearest expanded-search station passing the scenario gates. |
+| `nearest_pass_distance_km` | numeric | Distance from plant to nearest passing expanded station. |
+| `nearest_pass_normalized_coverage_ratio` | numeric | Normalized active-window coverage ratio for the nearest passing station. |
+| `nearest_pass_normalized_loaded_year_ratio` | numeric | Normalized active-window loaded-year ratio for the nearest passing station. |
+| `nearest_pass_station_ecwt_f` | numeric | Continuous station ECWT in Fahrenheit for the nearest passing station. |
+| `scenario_status` | text | `expanded_candidate_passes_coverage_gate` or `no_passing_station_within_search_radius`. |
+| `notes` | text | Scenario caveat; these rows do not alter official station selection. |
+
+## `calc.expanded_candidate_coverage_scenario_radius_summary`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `scenario_run_id` | text | Expanded-candidate scenario run lineage. |
+| `radius_km` | numeric | Radius bucket evaluated. |
+| `plant_count` | bigint | Near-threshold plants audited. |
+| `plants_with_passing_station` | bigint | Plants with at least one passing expanded station at or within the radius. |
+| `plants_without_passing_station` | bigint | Plants without a passing expanded station at or within the radius. |
+| `pass_rate` | numeric | Plants with passing station divided by total audited plants. |
+| `median_nearest_pass_distance_km` | numeric | Median nearest passing-station distance among pass rows. |
+| `median_nearest_pass_rank_order` | numeric | Median nearest passing-station rank among loaded stations. |
+
+## `calc.expanded_candidate_coverage_scenario_state_summary`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `scenario_run_id` | text | Expanded-candidate scenario run lineage. |
+| `plant_state` | text | Plant state. |
+| `plant_count` | bigint | Near-threshold plants audited in the state. |
+| `plants_with_passing_station_within_search_radius` | bigint | Plants in the state with a passing station within the maximum scenario radius. |
+| `nearest_pass_radius_buckets` | text | Compact radius-bucket distribution for nearest passing stations. |
+| `median_nearest_pass_distance_km` | numeric | Median nearest passing-station distance for pass rows in the state. |
+| `max_nearest_pass_distance_km` | numeric | Maximum nearest passing-station distance for pass rows in the state. |
+
 ## `calc.plant_ecwt`
 
 | Column | Type | Meaning |
