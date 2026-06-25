@@ -191,6 +191,9 @@ def export_rows(
             round(st.elevation_m, 3)::text as selected_station_elevation_m,
             st.first_observation_utc::text as selected_station_first_observation_utc,
             st.last_observation_utc::text as selected_station_last_observation_utc,
+            round(sc.distance_km, 3)::text as selected_distance_km,
+            round(sc.elevation_delta_m, 3)::text as selected_elevation_delta_m,
+            sc.rank_order::text as selected_rank_order,
             round(pe.ecwt_f, 3)::text as ecwt_f,
             round(pe.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
             round(pe.governing_ecwt_f, 3)::text as governing_ecwt_f,
@@ -234,6 +237,10 @@ def export_rows(
           on p.plant_id = rr.plant_id
         left join weather.station st
           on st.station_id = r.selected_station_id
+        left join link.station_candidate sc
+          on sc.calculation_run_id = pe_cr.parameters_json->>'candidate_run_id'
+         and sc.plant_id = rr.plant_id
+         and sc.station_id = r.selected_station_id
         left join link.station_selection_review review
           on review.station_selection_review_id = rr.station_selection_review_id
         where rr.calculation_run_id = {sql_literal(release_gate_run_id)}
@@ -389,6 +396,9 @@ def main() -> None:
         "selected_station_elevation_m",
         "selected_station_first_observation_utc",
         "selected_station_last_observation_utc",
+        "selected_distance_km",
+        "selected_elevation_delta_m",
+        "selected_rank_order",
         "ecwt_f",
         "ecwt_discrete_f",
         "governing_ecwt_f",
