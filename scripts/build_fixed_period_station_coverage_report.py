@@ -463,12 +463,25 @@ def render_report(
 ) -> None:
     total = len(rows)
     status_counts = Counter(row["fixed_period_status"] for row in rows)
+    pass_count = status_counts.get("fixed_period_pass", 0)
+    near_count = status_counts.get("fixed_period_near_pass", 0)
     median_ratio = sorted(to_float(row["fixed_coverage_ratio"]) or 0.0 for row in rows)[total // 2]
     median_loaded_years = sorted(to_int(row["loaded_station_year_count"]) or 0 for row in rows)[total // 2]
     max_ratio = max(to_float(row["fixed_coverage_ratio"]) or 0.0 for row in rows)
     min_ratio = min(to_float(row["fixed_coverage_ratio"]) or 0.0 for row in rows)
     expected_hours = rows[0].get("fixed_expected_djf_hours", "") if rows else ""
     coverage_run_id = rows[0].get("coverage_run_id", "") if rows else ""
+    readiness_denominator = str(readiness_params.get("coverage_denominator", ""))
+    if pass_count == total:
+        interpretation = (
+            "This fixed-period-selected cohort satisfies the fixed coverage gate. The remaining publication risk is no longer "
+            "the denominator itself; it is station-selection review, especially distance, rank, and cross-border assignments."
+        )
+    else:
+        interpretation = (
+            "This means the current strict publication-candidate label should remain provisional until the readiness "
+            "denominator policy is corrected."
+        )
 
     status_rows = [
         {
@@ -507,16 +520,16 @@ def render_report(
         "## Technical Summary",
         "",
         (
-            f"The current strict readiness run has `{total:,}` publication candidates under the active-window denominator. "
+            f"The current readiness run has `{total:,}` publication candidates under its recorded denominator "
+            f"(`{readiness_denominator}`). "
             f"When the same selected stations are tested against a fixed `{fixed_min_year}-{fixed_max_year}` DJF denominator, "
-            f"only `{status_counts.get('fixed_period_pass', 0):,}` rows pass coverage >= `{min_coverage_ratio:g}`. "
-            f"`{status_counts.get('fixed_period_near_pass', 0):,}` more rows are between `0.90` and `{min_coverage_ratio:g}`."
+            f"`{pass_count:,}` rows pass coverage >= `{min_coverage_ratio:g}`. "
+            f"`{near_count:,}` more rows are between `0.90` and `{min_coverage_ratio:g}`."
         ),
         "",
         (
             f"The median fixed-period coverage ratio is `{median_ratio:.4f}` with a median of `{median_loaded_years}` "
-            f"loaded station-years out of `{fixed_max_year - fixed_min_year + 1}`. This means the current strict "
-            "publication-candidate label should remain provisional until the readiness denominator policy is corrected."
+            f"loaded station-years out of `{fixed_max_year - fixed_min_year + 1}`. {interpretation}"
         ),
         "",
         "## Scope and Source Runs",
@@ -527,7 +540,7 @@ def render_report(
         f"- Readiness run: `{readiness_run_id}`",
         f"- Plant ECWT run: `{readiness_params.get('plant_ecwt_run_id', '')}`",
         f"- Station-year coverage run: `{coverage_run_id}`",
-        f"- Active-window denominator from readiness run: `{readiness_params.get('coverage_denominator', '')}`",
+        f"- Readiness denominator from run: `{readiness_denominator}`",
         f"- Fixed denominator: `{fixed_min_year}-{fixed_max_year}` DJF hours, `{expected_hours}` hours per selected station.",
         f"- Fixed pass gate used in this diagnostic: coverage ratio >= `{min_coverage_ratio:g}` and at least `{min_loaded_years}` loaded station-years.",
         f"- Detailed CSV: `{csv_path.name}`",
