@@ -266,7 +266,7 @@ create table if not exists weather.noaa_raw_backfill_manifest (
     created_at_utc timestamptz not null default now(),
     unique (inventory_run_id, station_id, source_year, calculation_run_id),
     constraint noaa_raw_backfill_manifest_status_check
-        check (manifest_status in ('planned', 'downloaded', 'skipped', 'failed'))
+        check (manifest_status in ('planned', 'downloaded', 'skipped', 'missing', 'failed'))
 );
 
 create index if not exists ix_noaa_raw_backfill_manifest_batch
@@ -297,7 +297,7 @@ create table if not exists weather.noaa_raw_download_attempt (
     created_at_utc timestamptz not null default now(),
     unique (manifest_id, calculation_run_id),
     constraint noaa_raw_download_attempt_status_check
-        check (download_status in ('downloaded', 'skipped_existing', 'failed_http', 'failed_exception', 'dry_run')),
+        check (download_status in ('downloaded', 'skipped_existing', 'missing_on_aws', 'failed_http', 'failed_exception', 'dry_run')),
     constraint noaa_raw_download_attempt_sha256_len
         check (file_sha256 is null or length(file_sha256) = 64)
 );

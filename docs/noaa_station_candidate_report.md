@@ -1,6 +1,6 @@
 # NOAA Station Candidate Report
 
-Generated UTC: 2026-06-23T21:01:53+00:00
+Generated UTC: 2026-06-25T06:57:07+00:00
 
 ## Database
 
@@ -10,9 +10,9 @@ Generated UTC: 2026-06-23T21:01:53+00:00
 
 ## Run
 
-- Calculation run ID: `noaa_station_candidates_20260623T210132Z`
+- Calculation run ID: `noaa_station_candidates_20260625T065445Z`
 - Methodology version: `eop012-ecwt-method-v0.1.0`
-- Code commit: `1cd13564bfd5d326be450f0f82a986a06b043435`
+- Code commit: `417d0a63175928fc7d21f579520d787523497a52`
 
 ## Source
 
@@ -23,7 +23,7 @@ Generated UTC: 2026-06-23T21:01:53+00:00
 
 ## Candidate Parameters
 
-- Top candidates per plant: `10`
+- Top candidates per plant: `100`
 - Initial radius: `250 km`
 - Expanded radius: `1000 km`
 - Coverage metrics: pending; these candidates are distance-only station metadata candidates.
@@ -34,10 +34,10 @@ Generated UTC: 2026-06-23T21:01:53+00:00
 | --- | ---: |
 | Parsed NOAA stations loaded | 19164 |
 | Plants with valid coordinates considered | 16104 |
-| Station candidate rows generated | 161040 |
-| Plants satisfied by initial radius | 16097 |
-| Plants requiring expanded radius | 7 |
-| Plants requiring global fallback | 0 |
+| Station candidate rows generated | 1610400 |
+| Plants satisfied by initial radius | 10955 |
+| Plants requiring expanded radius | 5052 |
+| Plants requiring global fallback | 97 |
 | Plants with no candidate | 0 |
 
 ## Database Row Counts
@@ -45,11 +45,11 @@ Generated UTC: 2026-06-23T21:01:53+00:00
 | Relation | Rows |
 | --- | ---: |
 | `weather.station` | 19164 |
-| `link.station_candidate for this run` | 161040 |
+| `link.station_candidate for this run` | 1610400 |
 | `plants with candidates for this run` | 16104 |
-| `audit.source_file` | 6 |
-| `audit.calculation_run` | 2 |
-| `audit.exception_log` | 29 |
+| `audit.source_file` | 62334 |
+| `audit.calculation_run` | 489 |
+| `audit.exception_log` | 507 |
 
 ## Notes
 
