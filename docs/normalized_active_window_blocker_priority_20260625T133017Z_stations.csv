@@ -1,0 +1,6 @@
+priority_run_id,station_id,station_name,station_state,station_country,plant_count,distinct_plant_states,top_plant_states,min_distance_km,median_distance_km,max_distance_km,min_normalized_coverage_ratio,median_normalized_coverage_ratio,max_normalized_coverage_ratio,total_valid_hour_gap_to_threshold,gap_le_24h_count,gap_le_168h_count,gap_le_720h_count,gap_le_2160h_count,gap_gt_2160h_count
+normalized_active_window_blocker_priority_20260625T133017Z,702460-99999,MINCHUMINA,AK,US,7,1,AK:7,437.973,635.424,818.938,0.938422,0.938422,0.938422,882,0,7,0,0,0
+normalized_active_window_blocker_priority_20260625T133017Z,723528-99999,FREDERICK MUNI,OK,US,3,1,TX:3,209.620,212.354,230.847,0.945034,0.945034,0.945034,195,0,3,0,0,0
+normalized_active_window_blocker_priority_20260625T133017Z,999999-26655,RED DOG MINE 3 SSW,AK,US,3,1,AK:3,75.564,161.616,433.235,0.934586,0.934586,0.934586,1605,0,0,3,0,0
+normalized_active_window_blocker_priority_20260625T133017Z,722539-99999,SAN MARCOS MUNI,TX,US,1,1,TX:1,163.362,163.362,163.362,0.947263,0.947263,0.947263,36,0,1,0,0,0
+normalized_active_window_blocker_priority_20260625T133017Z,703430-99999,MIDDLETON ISLAND,AK,US,1,1,AK:1,373.143,373.143,373.143,0.945151,0.945151,0.945151,53,0,1,0,0,0
