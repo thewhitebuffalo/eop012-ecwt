@@ -52,6 +52,10 @@ The next useful work is no longer bulk AWS download. It is station-selection and
 3. Resolve the 28 no-candidate plants by fixing missing plant coordinates or excluding placeholder/unsited plant records from the publication universe.
 4. Decide how to publish the 162 current publication candidates: as preview candidates, not final compliance output, until station-selection review is complete.
 
+The 28 no-candidate plants are itemized in `no_candidate_plants_20260625T044535Z.csv`
+and summarized in `no_candidate_plants_20260625T044535Z_report.md`. All 28 lack
+plant coordinates and have only `CN` generator status.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.
