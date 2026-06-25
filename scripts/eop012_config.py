@@ -37,7 +37,7 @@ STATION_HISTORY_CSV = env_path(
 )
 SOURCE_CLUSTER_PATH = env_path(
     "EOP012_SOURCE_CLUSTER_PATH",
-    DATA_ROOT / "postgres16_weather_build_5435",
+    DATA_ROOT / "legacy" / "postgres16_weather_build_5435",
 )
 PSQL = env_path("EOP012_PSQL", "psql")
 NOAA_RAW_ROOTS = env_path_list("EOP012_NOAA_RAW_ROOTS", [NOAA_GLOBAL_HOURLY_ROOT])

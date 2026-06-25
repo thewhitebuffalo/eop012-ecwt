@@ -39,6 +39,24 @@ dbname=eop012
 /opt/homebrew/opt/postgresql@16/bin/pg_isready -h 127.0.0.1 -p 5436
 ```
 
+## Retired Legacy Databases
+
+The old source clusters were retired on 2026-06-25 after the rebuilt `eop012`
+database and scoped plant ECWT release were completed. They are no longer
+defaults for any normal rebuild or publication workflow.
+
+Retired paths:
+
+```text
+/Volumes/NOAA_CACHE/postgres16_weather_build_RETIRED_20260625
+/Volumes/NOAA_CACHE/postgres16_weather_build_5435_RETIRED_20260625
+```
+
+Do not start these clusters during normal work. If historical replay is needed,
+restore one intentionally, start it on a non-conflicting port, and set
+`EOP012_SOURCE_CLUSTER_PATH` explicitly. See
+`docs/old_database_retirement_20260625.md`.
+
 ## Apply Schema
 
 ```bash

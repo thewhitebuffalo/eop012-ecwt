@@ -2,9 +2,10 @@
 """Load NOAA weather coverage metrics for plant-station candidates.
 
 This pass uses the legacy NOAA cache's precomputed station sample-hour table
-(`public.ecwt_raw_station`) as a fast coverage inventory. It does not load the
-full hourly weather table into the EOP012 database and it does not select final
-representative stations.
+(`public.ecwt_raw_station`) as a fast coverage inventory. It is retained for
+historical replay only after the 2026-06-25 retirement of the old source
+cluster. It does not load the full hourly weather table into the EOP012
+database and it does not select final representative stations.
 """
 
 from __future__ import annotations
