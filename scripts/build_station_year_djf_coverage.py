@@ -15,6 +15,7 @@ from pathlib import Path
 from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+SESSION_WORK_MEM = "256MB"
 
 
 def utc_now() -> datetime:
@@ -88,11 +89,13 @@ def build_sql(run_id: str, code_commit: str, min_year: int, max_year: int, compl
         "min_year": min_year,
         "max_year": max_year,
         "complete_threshold": complete_threshold,
+        "session_work_mem": SESSION_WORK_MEM,
         "coverage_status_rule": "complete if coverage_ratio >= threshold, partial if valid_djf_hours > 0, otherwise empty",
     }
     return f"""
 \\set ON_ERROR_STOP on
 begin;
+set local work_mem = {sql_literal(SESSION_WORK_MEM)};
 
 create table if not exists weather.station_year_djf_coverage (
     station_year_djf_coverage_id text primary key,

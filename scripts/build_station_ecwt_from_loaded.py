@@ -15,6 +15,7 @@ from pathlib import Path
 from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+SESSION_WORK_MEM = "256MB"
 
 
 def utc_now() -> datetime:
@@ -101,11 +102,13 @@ def build_sql(run_id: str, coverage_run_id: str, code_commit: str, percentile_ta
         "source": "weather.hourly_djf",
         "coverage_run_id": coverage_run_id,
         "percentile_target": percentile_target,
+        "session_work_mem": SESSION_WORK_MEM,
         "status": "provisional until station selection and full NOAA coverage are complete",
     }
     return f"""
 \\set ON_ERROR_STOP on
 begin;
+set local work_mem = {sql_literal(SESSION_WORK_MEM)};
 
 insert into audit.calculation_run (
     calculation_run_id,
