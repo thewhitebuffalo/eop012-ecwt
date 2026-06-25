@@ -207,7 +207,18 @@ def missing_inventory_rows(
         port,
         dbname,
         f"""
-        with year_counts as (
+        with inventory_params as (
+            select parameters_json->>'candidate_run_id' as candidate_run_id
+            from audit.calculation_run
+            where calculation_run_id = {sql_literal(inventory_run_id)}
+        ),
+        inventory_station as (
+            select distinct station_id
+            from weather.noaa_raw_file_inventory
+            where calculation_run_id = {sql_literal(inventory_run_id)}
+              and file_status = 'missing'
+        ),
+        year_counts as (
             select
                 source_year,
                 count(*) filter (where file_status = 'available') as source_year_available_count,
@@ -220,8 +231,12 @@ def missing_inventory_rows(
             select
                 station_id,
                 count(distinct plant_id)::integer as station_candidate_plant_links
-            from link.station_candidate
-            group by station_id
+            from link.station_candidate sc
+            join inventory_station ist using (station_id)
+            cross join inventory_params ip
+            where ip.candidate_run_id is null
+               or sc.calculation_run_id = ip.candidate_run_id
+            group by sc.station_id
         )
         select
             i.station_id,

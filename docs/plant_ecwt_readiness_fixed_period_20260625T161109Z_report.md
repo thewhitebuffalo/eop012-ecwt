@@ -1,0 +1,46 @@
+# Plant ECWT Readiness Report
+
+Generated UTC: 2026-06-25T16:11:11+00:00
+
+## Database
+
+- Host: `127.0.0.1`
+- Port: `5436`
+- Database: `eop012`
+
+## Run
+
+- Calculation run ID: `plant_ecwt_readiness_fixed_period_20260625T161109Z`
+- Plant ECWT run ID: `plant_ecwt_provisional_fixed_period_20260625T161041Z`
+- Methodology version: `eop012-ecwt-method-v0.1.0`
+- Code commit: `bd3c33c8073c2a66057773e07ae474d2b8eb9be4`
+- Minimum valid hours: `2000`
+- Minimum coverage ratio: `0.95`
+- Coverage denominator mode: `plant-ecwt-row`
+- Coverage year range: `2000-2025`
+
+## Summary
+
+| Relation or Check | Rows / Value |
+| --- | ---: |
+| `readiness rows` | 16132 |
+| `publication candidates` | 1868 |
+| `provisional low coverage` | 0 |
+| `blocked` | 14264 |
+| `minimum coverage ratio` | 0.9501 |
+| `median coverage ratio` | 0.9616 |
+
+## By Reason
+
+| Readiness | Reason | Rows |
+| --- | --- | ---: |
+| `blocked` | `no_fixed_period_eligible_candidate_station` | 14264 |
+| `publication_candidate` | `passes_current_publication_gate` | 1868 |
+
+## Interpretation
+
+- This is a working publication-readiness gate for provisional plant ECWT rows.
+- Coverage ratios use the denominator mode recorded above, not only currently loaded station-year files.
+- For fixed-period plant selection runs, use `plant-ecwt-row` so readiness preserves the fixed-period valid/expected hours stored on `calc.plant_ecwt`.
+- `publication_candidate` is not the same as final accepted compliance output; it means the row passes the current coverage thresholds.
+- Rows that fail this gate should stay out of a published compliance dataset until more weather coverage or manual review is available.
