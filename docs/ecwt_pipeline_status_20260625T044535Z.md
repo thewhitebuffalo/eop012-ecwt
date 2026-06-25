@@ -93,6 +93,25 @@ coverage ratios above 1.05 and a maximum ratio of 8.0. Those overfilled rows
 show that station active-window metadata needs a normalization rule before it
 can safely become the publication denominator.
 
+The normalized first-operable denominator diagnostic is
+`fixed_period_denominator_diagnostic_first-operable_20260625T053208Z_report.md`,
+with detail rows in
+`fixed_period_denominator_diagnostic_first-operable_20260625T053208Z.csv`. It
+adds a conservative loaded-year normalization rule: each station active window
+is expanded to the union of NOAA station metadata bounds and full loaded
+station-years from `weather.station_year_djf_coverage`. This removes the
+active-window overfill problem in the best-candidate rows: normalized
+active-window overfill count is 0, no best normalized active-window ratio
+exceeds 1.00, and the maximum best normalized active-window ratio is 0.994.
+
+Under that conservative normalization, 5,992 of the 13,226 first-operable
+blockers would pass normalized active-window coverage plus normalized
+active-loaded-year-ratio. The remaining 7,234 still fail normalized
+active-window coverage. This gives a defensible intermediate policy option
+between the current full fixed-period gate, which yields 144 first-operable
+publication candidates, and the raw metadata active-window gate, which is too
+permissive because some station metadata windows understate loaded observations.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.

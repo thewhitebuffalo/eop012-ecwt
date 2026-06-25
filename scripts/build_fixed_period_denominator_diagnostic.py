@@ -345,6 +345,7 @@ def build_station_metrics(
         active_valid = 0
         active_loaded_years = 0
         active_complete_years = 0
+        year_data: dict[int, tuple[int, bool, bool]] = {}
         for year in range(min_year, max_year + 1):
             cov = coverage.get((station_id, year))
             valid = int_value(cov.get("valid_djf_hours") if cov else None)
@@ -352,6 +353,7 @@ def build_station_metrics(
             fixed_duplicate += int_value(cov.get("duplicate_hour_count") if cov else None)
             loaded = int_value(cov.get("loaded_file_count") if cov else None) > 0
             complete = bool(cov and cov.get("coverage_status") == "complete")
+            year_data[year] = (valid, loaded, complete)
             if loaded:
                 loaded_years += 1
                 first_loaded = year if first_loaded is None else min(first_loaded, year)
@@ -368,6 +370,27 @@ def build_station_metrics(
         active_expected_total = sum(active_expected.values())
         active_years = sum(1 for hours in active_expected.values() if hours > 0)
         active_overfilled = max(active_valid - active_expected_total, 0)
+
+        loaded_window_start = datetime(first_loaded, 1, 1, tzinfo=timezone.utc) if first_loaded else None
+        loaded_window_end = datetime(last_loaded, 12, 31, 23, tzinfo=timezone.utc) if last_loaded else None
+        normalized_first_candidates = [dt for dt in (first_obs, loaded_window_start) if dt is not None]
+        normalized_last_candidates = [dt for dt in (last_obs, loaded_window_end) if dt is not None]
+        normalized_first = min(normalized_first_candidates) if normalized_first_candidates else None
+        normalized_last = max(normalized_last_candidates) if normalized_last_candidates else None
+        normalized_active_expected = active_expected_by_year(normalized_first, normalized_last, min_year, max_year)
+        normalized_active_valid = 0
+        normalized_active_loaded_years = 0
+        normalized_active_complete_years = 0
+        for year, (valid, loaded, complete) in year_data.items():
+            if normalized_active_expected[year] > 0:
+                normalized_active_valid += valid
+                if loaded:
+                    normalized_active_loaded_years += 1
+                if complete:
+                    normalized_active_complete_years += 1
+        normalized_active_expected_total = sum(normalized_active_expected.values())
+        normalized_active_years = sum(1 for hours in normalized_active_expected.values() if hours > 0)
+        normalized_active_overfilled = max(normalized_active_valid - normalized_active_expected_total, 0)
         metrics[station_id] = {
             "fixed_expected_djf_hours": fixed_expected,
             "fixed_valid_djf_hours": fixed_valid,
@@ -387,6 +410,23 @@ def build_station_metrics(
             "active_complete_station_year_count": active_complete_years,
             "active_coverage_ratio": active_valid / active_expected_total if active_expected_total else None,
             "active_loaded_year_ratio": active_loaded_years / active_years if active_years else None,
+            "loaded_window_first_year": first_loaded,
+            "loaded_window_last_year": last_loaded,
+            "normalized_active_first_utc": normalized_first.isoformat().replace("+00:00", "Z") if normalized_first else "",
+            "normalized_active_last_utc": normalized_last.isoformat().replace("+00:00", "Z") if normalized_last else "",
+            "normalized_active_expected_djf_hours": normalized_active_expected_total,
+            "normalized_active_valid_djf_hours": normalized_active_valid,
+            "normalized_active_missing_djf_hours": max(normalized_active_expected_total - normalized_active_valid, 0),
+            "normalized_active_overfilled_hour_count": normalized_active_overfilled,
+            "normalized_active_djf_year_count": normalized_active_years,
+            "normalized_active_loaded_station_year_count": normalized_active_loaded_years,
+            "normalized_active_complete_station_year_count": normalized_active_complete_years,
+            "normalized_active_coverage_ratio": (
+                normalized_active_valid / normalized_active_expected_total if normalized_active_expected_total else None
+            ),
+            "normalized_active_loaded_year_ratio": (
+                normalized_active_loaded_years / normalized_active_years if normalized_active_years else None
+            ),
         }
     return metrics
 
@@ -399,8 +439,10 @@ def candidate_eval(row: dict[str, str], metrics: dict[str, object], min_ratio: f
     )
     fixed_ratio = metrics.get("fixed_coverage_ratio")
     active_ratio = metrics.get("active_coverage_ratio")
+    normalized_active_ratio = metrics.get("normalized_active_coverage_ratio")
     loaded_years = int(metrics.get("loaded_station_year_count") or 0)
     active_loaded_year_ratio = metrics.get("active_loaded_year_ratio")
+    normalized_active_loaded_year_ratio = metrics.get("normalized_active_loaded_year_ratio")
     eval_row: dict[str, object] = dict(row)
     eval_row.update(metrics)
     eval_row["has_station_ecwt_row"] = bool(row.get("station_ecwt_id"))
@@ -416,6 +458,22 @@ def candidate_eval(row: dict[str, str], metrics: dict[str, object], min_ratio: f
         and active_ratio >= min_ratio
         and active_loaded_year_ratio is not None
         and active_loaded_year_ratio >= min_ratio
+    )
+    eval_row["normalized_active_coverage_eligible"] = bool(
+        has_provisional and normalized_active_ratio is not None and normalized_active_ratio >= min_ratio
+    )
+    eval_row["normalized_active_coverage_absolute_loaded_eligible"] = bool(
+        has_provisional
+        and normalized_active_ratio is not None
+        and normalized_active_ratio >= min_ratio
+        and loaded_years >= min_loaded_years
+    )
+    eval_row["normalized_active_window_eligible"] = bool(
+        has_provisional
+        and normalized_active_ratio is not None
+        and normalized_active_ratio >= min_ratio
+        and normalized_active_loaded_year_ratio is not None
+        and normalized_active_loaded_year_ratio >= min_ratio
     )
     return eval_row
 
@@ -444,6 +502,19 @@ def sort_key_active(candidate: dict[str, object]) -> tuple[object, ...]:
     )
 
 
+def sort_key_normalized_active(candidate: dict[str, object]) -> tuple[object, ...]:
+    return (
+        not bool(candidate["normalized_active_window_eligible"]),
+        not bool(candidate["normalized_active_coverage_eligible"]),
+        -(float(candidate.get("normalized_active_coverage_ratio") or 0.0)),
+        -(float(candidate.get("normalized_active_loaded_year_ratio") or 0.0)),
+        -(float(candidate.get("fixed_coverage_ratio") or 0.0)),
+        int_value(candidate.get("rank_order"), 999999),
+        float_value(candidate.get("distance_km_num"), 1e12),
+        str(candidate.get("station_id") or ""),
+    )
+
+
 def build_detail_rows(
     blocked_plants: list[dict[str, str]],
     candidates: list[dict[str, str]],
@@ -462,6 +533,7 @@ def build_detail_rows(
         provisional = [row for row in plant_candidates if row["has_provisional_station_ecwt"]]
         best_fixed = sorted(provisional, key=sort_key_fixed)[0] if provisional else {}
         best_active = sorted(provisional, key=sort_key_active)[0] if provisional else {}
+        best_normalized_active = sorted(provisional, key=sort_key_normalized_active)[0] if provisional else {}
 
         candidate_count = len(plant_candidates)
         station_ecwt_count = sum(1 for row in plant_candidates if row["has_station_ecwt_row"])
@@ -470,11 +542,28 @@ def build_detail_rows(
         active_coverage_count = sum(1 for row in plant_candidates if row["active_coverage_eligible"])
         active_abs_count = sum(1 for row in plant_candidates if row["active_coverage_absolute_loaded_eligible"])
         active_window_count = sum(1 for row in plant_candidates if row["active_window_eligible"])
+        normalized_active_coverage_count = sum(
+            1 for row in plant_candidates if row["normalized_active_coverage_eligible"]
+        )
+        normalized_active_abs_count = sum(
+            1 for row in plant_candidates if row["normalized_active_coverage_absolute_loaded_eligible"]
+        )
+        normalized_active_window_count = sum(
+            1 for row in plant_candidates if row["normalized_active_window_eligible"]
+        )
         best_fixed_ratio = max((float(row.get("fixed_coverage_ratio") or 0) for row in plant_candidates), default=0.0)
         best_loaded_years = max((int(row.get("loaded_station_year_count") or 0) for row in plant_candidates), default=0)
         best_fixed_valid = max((int(row.get("fixed_valid_djf_hours") or 0) for row in plant_candidates), default=0)
         best_active_ratio = max((float(row.get("active_coverage_ratio") or 0) for row in plant_candidates), default=0.0)
         best_active_loaded_ratio = max((float(row.get("active_loaded_year_ratio") or 0) for row in plant_candidates), default=0.0)
+        best_normalized_active_ratio = max(
+            (float(row.get("normalized_active_coverage_ratio") or 0) for row in plant_candidates),
+            default=0.0,
+        )
+        best_normalized_active_loaded_ratio = max(
+            (float(row.get("normalized_active_loaded_year_ratio") or 0) for row in plant_candidates),
+            default=0.0,
+        )
 
         if fixed_eligible_count:
             current_class = "unexpected_blocked_has_eligible_candidate"
@@ -504,10 +593,24 @@ def build_detail_rows(
         else:
             active_class = "still_fails_active_window_coverage"
 
+        if candidate_count == 0:
+            normalized_active_class = "no_station_candidates"
+        elif provisional_count == 0:
+            normalized_active_class = "no_candidate_with_provisional_station_ecwt"
+        elif normalized_active_window_count:
+            normalized_active_class = "would_pass_normalized_active_window_coverage_and_active_year_ratio"
+        elif normalized_active_abs_count:
+            normalized_active_class = "would_pass_normalized_active_window_coverage_plus_20_loaded_years"
+        elif normalized_active_coverage_count:
+            normalized_active_class = "would_pass_normalized_active_window_coverage_only"
+        else:
+            normalized_active_class = "still_fails_normalized_active_window_coverage"
+
         detail = {
             **plant,
             "current_blocker_class": current_class,
             "active_window_class": active_class,
+            "normalized_active_window_class": normalized_active_class,
             "candidate_count": str(candidate_count),
             "candidate_with_station_ecwt_row_count": str(station_ecwt_count),
             "candidate_with_provisional_station_ecwt_count": str(provisional_count),
@@ -515,14 +618,20 @@ def build_detail_rows(
             "active_coverage_eligible_candidate_count": str(active_coverage_count),
             "active_coverage_absolute_loaded_eligible_candidate_count": str(active_abs_count),
             "active_window_eligible_candidate_count": str(active_window_count),
+            "normalized_active_coverage_eligible_candidate_count": str(normalized_active_coverage_count),
+            "normalized_active_coverage_absolute_loaded_eligible_candidate_count": str(normalized_active_abs_count),
+            "normalized_active_window_eligible_candidate_count": str(normalized_active_window_count),
             "best_fixed_coverage_ratio": fmt_float(best_fixed_ratio),
             "best_loaded_station_year_count": str(best_loaded_years),
             "best_fixed_valid_djf_hours": str(best_fixed_valid),
             "best_active_coverage_ratio": fmt_float(best_active_ratio),
             "best_active_loaded_year_ratio": fmt_float(best_active_loaded_ratio),
+            "best_normalized_active_coverage_ratio": fmt_float(best_normalized_active_ratio),
+            "best_normalized_active_loaded_year_ratio": fmt_float(best_normalized_active_loaded_ratio),
         }
         add_candidate_fields(detail, "best_fixed", best_fixed)
         add_candidate_fields(detail, "best_active", best_active)
+        add_candidate_fields(detail, "best_normalized_active", best_normalized_active)
         details.append(detail)
     return details
 
@@ -559,6 +668,18 @@ def add_candidate_fields(detail: dict[str, str], prefix: str, candidate: dict[st
         "active_loaded_station_year_count",
         "active_coverage_ratio",
         "active_loaded_year_ratio",
+        "loaded_window_first_year",
+        "loaded_window_last_year",
+        "normalized_active_first_utc",
+        "normalized_active_last_utc",
+        "normalized_active_expected_djf_hours",
+        "normalized_active_valid_djf_hours",
+        "normalized_active_missing_djf_hours",
+        "normalized_active_overfilled_hour_count",
+        "normalized_active_djf_year_count",
+        "normalized_active_loaded_station_year_count",
+        "normalized_active_coverage_ratio",
+        "normalized_active_loaded_year_ratio",
     )
     for field in metric_fields:
         value = candidate.get(field)
@@ -599,6 +720,7 @@ def render_report(
 ) -> None:
     current_counts = Counter(row["current_blocker_class"] for row in rows)
     active_counts = Counter(row["active_window_class"] for row in rows)
+    normalized_active_counts = Counter(row["normalized_active_window_class"] for row in rows)
     state_counts = Counter(row["plant_state"] or "(blank)" for row in rows)
 
     active_coverage_any = sum(1 for row in rows if int_value(row["active_coverage_eligible_candidate_count"]) > 0)
@@ -606,13 +728,38 @@ def render_report(
         1 for row in rows if int_value(row["active_coverage_absolute_loaded_eligible_candidate_count"]) > 0
     )
     active_window_any = sum(1 for row in rows if int_value(row["active_window_eligible_candidate_count"]) > 0)
+    normalized_active_coverage_any = sum(
+        1 for row in rows if int_value(row["normalized_active_coverage_eligible_candidate_count"]) > 0
+    )
+    normalized_active_abs_loaded_any = sum(
+        1 for row in rows if int_value(row["normalized_active_coverage_absolute_loaded_eligible_candidate_count"]) > 0
+    )
+    normalized_active_window_any = sum(
+        1 for row in rows if int_value(row["normalized_active_window_eligible_candidate_count"]) > 0
+    )
     active_overfilled = sum(1 for row in rows if int_value(row["best_active_active_overfilled_hour_count"]) > 0)
     active_ratio_over_1 = sum(1 for row in rows if float_value(row["best_active_active_coverage_ratio"]) > 1.0)
     active_ratio_over_105 = sum(1 for row in rows if float_value(row["best_active_active_coverage_ratio"]) > 1.05)
     max_active_ratio = max((float_value(row["best_active_active_coverage_ratio"]) for row in rows), default=0.0)
+    normalized_active_overfilled = sum(
+        1 for row in rows if int_value(row["best_normalized_active_normalized_active_overfilled_hour_count"]) > 0
+    )
+    normalized_active_ratio_over_1 = sum(
+        1 for row in rows if float_value(row["best_normalized_active_normalized_active_coverage_ratio"]) > 1.0
+    )
+    normalized_active_ratio_over_105 = sum(
+        1 for row in rows if float_value(row["best_normalized_active_normalized_active_coverage_ratio"]) > 1.05
+    )
+    max_normalized_active_ratio = max(
+        (float_value(row["best_normalized_active_normalized_active_coverage_ratio"]) for row in rows),
+        default=0.0,
+    )
 
     current_rows = [{"class": key, "rows": f"{value:,}"} for key, value in current_counts.most_common()]
     active_rows = [{"class": key, "rows": f"{value:,}"} for key, value in active_counts.most_common()]
+    normalized_active_rows = [
+        {"class": key, "rows": f"{value:,}"} for key, value in normalized_active_counts.most_common()
+    ]
     state_rows = [{"plant_state": key, "rows": f"{value:,}"} for key, value in state_counts.most_common(20)]
     overfill_examples = sorted(
         (row for row in rows if int_value(row["best_active_active_overfilled_hour_count"]) > 0),
@@ -622,6 +769,15 @@ def render_report(
     still_fails_examples = sorted(
         (row for row in rows if row["active_window_class"] == "still_fails_active_window_coverage"),
         key=lambda row: float_value(row["best_active_coverage_ratio"]),
+        reverse=True,
+    )[:20]
+    normalized_still_fails_examples = sorted(
+        (
+            row
+            for row in rows
+            if row["normalized_active_window_class"] == "still_fails_normalized_active_window_coverage"
+        ),
+        key=lambda row: float_value(row["best_normalized_active_coverage_ratio"]),
         reverse=True,
     )[:20]
 
@@ -653,17 +809,26 @@ def render_report(
         f"| Active-window coverage pass, any candidate | {active_coverage_any:,} |",
         f"| Active-window coverage plus 20 loaded fixed years pass, any candidate | {active_abs_loaded_any:,} |",
         f"| Active-window coverage plus active-loaded-year-ratio pass, any candidate | {active_window_any:,} |",
+        f"| Normalized active-window coverage pass, any candidate | {normalized_active_coverage_any:,} |",
+        f"| Normalized active-window coverage plus 20 loaded fixed years pass, any candidate | {normalized_active_abs_loaded_any:,} |",
+        f"| Normalized active-window coverage plus active-loaded-year-ratio pass, any candidate | {normalized_active_window_any:,} |",
         f"| Best active-window candidate has valid hours beyond active expected hours | {active_overfilled:,} |",
         f"| Best active-window coverage ratio > 1.00 | {active_ratio_over_1:,} |",
         f"| Best active-window coverage ratio > 1.05 | {active_ratio_over_105:,} |",
         f"| Maximum best active-window coverage ratio | {max_active_ratio:.3f} |",
+        f"| Best normalized active-window candidate has valid hours beyond normalized expected hours | {normalized_active_overfilled:,} |",
+        f"| Best normalized active-window coverage ratio > 1.00 | {normalized_active_ratio_over_1:,} |",
+        f"| Best normalized active-window coverage ratio > 1.05 | {normalized_active_ratio_over_105:,} |",
+        f"| Maximum best normalized active-window coverage ratio | {max_normalized_active_ratio:.3f} |",
         "",
         "## Current Fixed-Period Blocker Classes",
         "",
     ]
     render_table(lines, ["Class", "Rows"], current_rows, ["class", "rows"])
-    lines.extend(["", "## Active-Window Sensitivity Classes", ""])
+    lines.extend(["", "## Raw Active-Window Sensitivity Classes", ""])
     render_table(lines, ["Class", "Rows"], active_rows, ["class", "rows"])
+    lines.extend(["", "## Normalized Active-Window Sensitivity Classes", ""])
+    render_table(lines, ["Class", "Rows"], normalized_active_rows, ["class", "rows"])
     lines.extend(["", "## Top Blocked Plant States", ""])
     render_table(lines, ["Plant State", "Rows"], state_rows, ["plant_state", "rows"])
     lines.extend(["", "## Active-Window Overfill Examples", ""])
@@ -699,15 +864,33 @@ def render_report(
             "best_active_rank_order",
         ],
     )
+    lines.extend(["", "## Still Fails Normalized Active-Window Coverage Examples", ""])
+    render_table(
+        lines,
+        ["Plant", "State", "Station", "Normalized Ratio", "Fixed Ratio", "Normalized Loaded Year Ratio", "Distance km", "Rank"],
+        normalized_still_fails_examples,
+        [
+            "plant_name",
+            "plant_state",
+            "best_normalized_active_station_id",
+            "best_normalized_active_normalized_active_coverage_ratio",
+            "best_normalized_active_fixed_coverage_ratio",
+            "best_normalized_active_normalized_active_loaded_year_ratio",
+            "best_normalized_active_distance_km",
+            "best_normalized_active_rank_order",
+        ],
+    )
     lines.extend(
         [
             "",
             "## Interpretation",
             "",
             "- The current fixed-period gate uses the full 2000-2025 DJF denominator for station eligibility, plus a 20 loaded station-year minimum.",
-            "- The active-window sensitivity uses NOAA station first/last observation metadata to shrink the expected-hour denominator before testing coverage.",
+            "- The raw active-window sensitivity uses NOAA station first/last observation metadata to shrink the expected-hour denominator before testing coverage.",
+            "- The normalized active-window sensitivity expands each station window to the union of NOAA station metadata bounds and full loaded station-years observed in `weather.station_year_djf_coverage`.",
             "- A large active-window pass count means the full fixed-period denominator is the dominant blocker for many plants.",
-            "- Active-window ratios above 1.00 are a warning sign, not a pass recommendation: they mean the loaded annual file contributes more valid DJF hours than the station metadata active window expects.",
+            "- Raw active-window ratios above 1.00 are a warning sign, not a pass recommendation: they mean the loaded annual file contributes more valid DJF hours than the station metadata active window expects.",
+            "- Normalized active-window overfill counts should be zero or near zero; nonzero values would indicate the normalization rule still understates actual loaded observations.",
             "- This diagnostic supports a methodology decision. It does not change publication readiness or plant ECWT selection by itself.",
             "",
         ]
@@ -768,7 +951,6 @@ def main() -> None:
         args.user,
         coverage_rows_query(coverage_run_id, fixed_min_year, fixed_max_year),
     )
-
     station_metrics = build_station_metrics(candidates, coverage_rows, fixed_min_year, fixed_max_year)
     rows = build_detail_rows(
         blocked_plants,
