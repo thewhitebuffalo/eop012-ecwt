@@ -96,11 +96,76 @@ def latest_coverage_run_id(psql: Path, host: str, port: int, dbname: str, user: 
     return run_id
 
 
-def build_sql(run_id: str, coverage_run_id: str, code_commit: str, percentile_target: float) -> str:
+def coverage_row_count(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    coverage_run_id: str,
+    coverage_table: str,
+    user: str | None,
+) -> int:
+    return int(
+        psql_scalar(
+            psql,
+            host,
+            port,
+            dbname,
+            f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(coverage_run_id)};",
+            user,
+        )
+        or "0"
+    )
+
+
+def relation_exists(psql: Path, host: str, port: int, dbname: str, relation_name: str, user: str | None) -> bool:
+    exists = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        f"select to_regclass({sql_literal(relation_name)}) is not null;",
+        user,
+    )
+    return exists.lower() == "t"
+
+
+def resolve_coverage_table(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    coverage_run_id: str,
+    coverage_source: str,
+    user: str | None,
+) -> str:
+    if coverage_source == "history":
+        return "weather.station_year_djf_coverage"
+    if coverage_source == "current":
+        return "weather.station_year_djf_coverage_current"
+    current_table = "weather.station_year_djf_coverage_current"
+    history_table = "weather.station_year_djf_coverage"
+    if relation_exists(psql, host, port, dbname, current_table, user) and coverage_row_count(
+        psql, host, port, dbname, coverage_run_id, current_table, user
+    ) > 0:
+        return current_table
+    return history_table
+
+
+def build_sql(
+    run_id: str,
+    coverage_run_id: str,
+    coverage_table: str,
+    code_commit: str,
+    percentile_target: float,
+) -> str:
     start = utc_now().isoformat(timespec="seconds")
+    if coverage_table not in {"weather.station_year_djf_coverage", "weather.station_year_djf_coverage_current"}:
+        raise ValueError("Unexpected coverage table.")
     params = {
         "source": "weather.hourly_djf",
         "coverage_run_id": coverage_run_id,
+        "coverage_table": coverage_table,
         "percentile_target": percentile_target,
         "session_work_mem": SESSION_WORK_MEM,
         "status": "provisional until station selection and full NOAA coverage are complete",
@@ -142,7 +207,7 @@ with coverage as (
         coalesce(sum(valid_djf_hours), 0)::bigint as coverage_valid_hour_count,
         coalesce(sum(missing_hour_count), 0)::bigint as missing_hour_count,
         coalesce(sum(duplicate_hour_count), 0)::bigint as duplicate_hour_count
-    from weather.station_year_djf_coverage
+    from {coverage_table}
     where calculation_run_id = {sql_literal(coverage_run_id)}
     group by station_id
 ),
@@ -257,6 +322,7 @@ def render_report(
     path: Path,
     run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     code_commit: str,
     percentile_target: float,
     db_counts: OrderedDict[str, str],
@@ -280,6 +346,7 @@ def render_report(
         "",
         f"- Calculation run ID: `{run_id}`",
         f"- Coverage run ID: `{coverage_run_id}`",
+        f"- Coverage table: `{coverage_table}`",
         f"- Methodology version: `{METHODOLOGY_VERSION}`",
         f"- Code commit: `{code_commit}`",
         f"- Percentile target: `{percentile_target}`",
@@ -318,13 +385,28 @@ def main() -> int:
     parser.add_argument("--dbname", default="eop012")
     parser.add_argument("--user", default=None)
     parser.add_argument("--coverage-run-id", default=None)
+    parser.add_argument(
+        "--coverage-source",
+        choices=["auto", "current", "history"],
+        default="auto",
+        help="Coverage relation to read. Auto prefers compact current coverage when rows exist for the run.",
+    )
     parser.add_argument("--percentile-target", type=float, default=0.002)
     args = parser.parse_args()
 
     coverage_run_id = args.coverage_run_id or latest_coverage_run_id(args.psql, args.host, args.port, args.dbname, args.user)
+    coverage_table = resolve_coverage_table(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        coverage_run_id,
+        args.coverage_source,
+        args.user,
+    )
     code_commit = git_commit_label(args.project_root)
     run_id = f"station_ecwt_loaded_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
-    sql = build_sql(run_id, coverage_run_id, code_commit, args.percentile_target)
+    sql = build_sql(run_id, coverage_run_id, coverage_table, code_commit, args.percentile_target)
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user), input_text=sql)
 
     db_counts = report_counts(args.psql, args.host, args.port, args.dbname, run_id, args.user)
@@ -353,6 +435,7 @@ def main() -> int:
         report_path,
         run_id,
         coverage_run_id,
+        coverage_table,
         code_commit,
         args.percentile_target,
         db_counts,

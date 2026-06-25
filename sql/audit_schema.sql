@@ -152,6 +152,20 @@ create table if not exists weather.hourly_djf (
 create index if not exists ix_weather_hourly_djf_hour
     on weather.hourly_djf (hour_ending_utc);
 
+create table if not exists weather.station_year_hourly_summary (
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    valid_djf_hours bigint not null,
+    min_hour_ending_utc timestamptz,
+    max_hour_ending_utc timestamptz,
+    refreshed_at_utc timestamptz not null default now(),
+    source_basis text not null,
+    primary key (station_id, source_year)
+);
+
+create index if not exists ix_station_year_hourly_summary_year
+    on weather.station_year_hourly_summary (source_year);
+
 create table if not exists weather.noaa_hourly_load_file (
     load_file_id text primary key,
     calculation_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -187,6 +201,9 @@ create index if not exists ix_noaa_hourly_load_file_status
 create index if not exists ix_noaa_hourly_load_file_station_year
     on weather.noaa_hourly_load_file (station_id, source_year);
 
+create index if not exists ix_noaa_hourly_load_file_status_year_station
+    on weather.noaa_hourly_load_file (file_status, source_year, station_id);
+
 alter table weather.noaa_hourly_load_file
     add column if not exists rejected_source_rows bigint not null default 0;
 
@@ -220,8 +237,41 @@ create table if not exists weather.station_year_djf_coverage (
 create index if not exists ix_station_year_djf_coverage_station_year
     on weather.station_year_djf_coverage (station_id, source_year);
 
+create index if not exists ix_station_year_djf_coverage_run_station_year
+    on weather.station_year_djf_coverage (calculation_run_id, station_id, source_year);
+
 create index if not exists ix_station_year_djf_coverage_status
     on weather.station_year_djf_coverage (calculation_run_id, coverage_status);
+
+create table if not exists weather.station_year_djf_coverage_current (
+    station_year_djf_coverage_id text primary key,
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    period_start_utc timestamptz not null,
+    period_end_utc timestamptz not null,
+    expected_djf_hours bigint not null,
+    valid_djf_hours bigint not null,
+    missing_hour_count bigint not null,
+    loaded_file_count bigint not null,
+    invalid_temp_row_count bigint not null,
+    rejected_source_row_count bigint not null,
+    rejected_plausibility_row_count bigint not null,
+    duplicate_hour_count bigint not null,
+    coverage_ratio numeric,
+    coverage_status text not null,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (station_id, source_year),
+    constraint station_year_djf_coverage_current_status_check
+        check (coverage_status in ('complete', 'partial', 'empty'))
+);
+
+create index if not exists ix_station_year_djf_coverage_current_run_station_year
+    on weather.station_year_djf_coverage_current (calculation_run_id, station_id, source_year);
+
+create index if not exists ix_station_year_djf_coverage_current_status
+    on weather.station_year_djf_coverage_current (calculation_run_id, coverage_status);
 
 create table if not exists weather.noaa_raw_file_inventory (
     inventory_id text primary key,
@@ -345,6 +395,12 @@ create table if not exists link.station_candidate (
 create index if not exists ix_station_candidate_plant_rank
     on link.station_candidate (plant_id, rank_order);
 
+create index if not exists ix_station_candidate_run_status_station
+    on link.station_candidate (calculation_run_id, candidate_status, station_id, plant_id, rank_order, distance_km);
+
+create index if not exists ix_station_candidate_run_status_plant_rank
+    on link.station_candidate (calculation_run_id, candidate_status, plant_id, rank_order, distance_km, station_id);
+
 create table if not exists link.station_selection (
     station_selection_id text primary key,
     plant_id text not null references asset.plant(plant_id),
@@ -395,6 +451,9 @@ create table if not exists calc.station_ecwt (
     constraint station_ecwt_result_status_check
         check (result_status in ('accepted', 'provisional', 'blocked', 'superseded'))
 );
+
+create index if not exists ix_station_ecwt_run_status_station
+    on calc.station_ecwt (calculation_run_id, result_status, station_id);
 
 create table if not exists calc.plant_ecwt (
     plant_ecwt_id text primary key,

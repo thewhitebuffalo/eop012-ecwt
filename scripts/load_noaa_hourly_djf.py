@@ -157,6 +157,20 @@ create index if not exists ix_noaa_hourly_load_file_status
     on weather.noaa_hourly_load_file (calculation_run_id, file_status);
 create index if not exists ix_noaa_hourly_load_file_station_year
     on weather.noaa_hourly_load_file (station_id, source_year);
+create index if not exists ix_noaa_hourly_load_file_status_year_station
+    on weather.noaa_hourly_load_file (file_status, source_year, station_id);
+create table if not exists weather.station_year_hourly_summary (
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    valid_djf_hours bigint not null,
+    min_hour_ending_utc timestamptz,
+    max_hour_ending_utc timestamptz,
+    refreshed_at_utc timestamptz not null default now(),
+    source_basis text not null,
+    primary key (station_id, source_year)
+);
+create index if not exists ix_station_year_hourly_summary_year
+    on weather.station_year_hourly_summary (source_year);
 alter table weather.noaa_hourly_load_file
     add column if not exists rejected_source_rows bigint not null default 0;
 alter table weather.noaa_hourly_load_file
@@ -641,6 +655,43 @@ on conflict (station_id, source_year, local_path) do update set
     max_hour_ending_utc = excluded.max_hour_ending_utc,
     error_message = excluded.error_message,
     notes = excluded.notes;
+""",
+            """
+create temp table stg_touched_station_year as
+select distinct station_id, source_year
+from stg_noaa_hourly_load_file
+where file_status = 'loaded';
+""",
+            """
+insert into weather.station_year_hourly_summary (
+    station_id,
+    source_year,
+    valid_djf_hours,
+    min_hour_ending_utc,
+    max_hour_ending_utc,
+    refreshed_at_utc,
+    source_basis
+)
+select
+    touched.station_id,
+    touched.source_year,
+    count(hourly.hour_ending_utc)::bigint as valid_djf_hours,
+    min(hourly.hour_ending_utc) as min_hour_ending_utc,
+    max(hourly.hour_ending_utc) as max_hour_ending_utc,
+    now() as refreshed_at_utc,
+    'weather.hourly_djf canonical DJF rows refreshed by load_noaa_hourly_djf.py' as source_basis
+from stg_touched_station_year touched
+left join weather.hourly_djf hourly
+  on hourly.station_id = touched.station_id
+ and hourly.hour_ending_utc >= make_timestamptz(touched.source_year, 1, 1, 0, 0, 0.0, 'UTC')
+ and hourly.hour_ending_utc < make_timestamptz(touched.source_year + 1, 1, 1, 0, 0, 0.0, 'UTC')
+group by touched.station_id, touched.source_year
+on conflict (station_id, source_year) do update set
+    valid_djf_hours = excluded.valid_djf_hours,
+    min_hour_ending_utc = excluded.min_hour_ending_utc,
+    max_hour_ending_utc = excluded.max_hour_ending_utc,
+    refreshed_at_utc = excluded.refreshed_at_utc,
+    source_basis = excluded.source_basis;
 """,
             "commit;",
         ]

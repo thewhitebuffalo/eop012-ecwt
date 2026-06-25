@@ -82,20 +82,71 @@ def git_commit_label(project_root: Path) -> str:
         return "UNCOMMITTED_WORKTREE"
 
 
-def build_sql(run_id: str, code_commit: str, min_year: int, max_year: int, complete_threshold: float) -> str:
+def build_sql(
+    run_id: str,
+    code_commit: str,
+    min_year: int,
+    max_year: int,
+    complete_threshold: float,
+    snapshot_mode: str,
+) -> str:
     start = utc_now().isoformat(timespec="seconds")
+    if snapshot_mode not in {"current", "historical"}:
+        raise ValueError("snapshot_mode must be current or historical")
+    target_table = (
+        "weather.station_year_djf_coverage_current"
+        if snapshot_mode == "current"
+        else "weather.station_year_djf_coverage"
+    )
+    prepare_target_sql = (
+        "truncate table weather.station_year_djf_coverage_current;"
+        if snapshot_mode == "current"
+        else f"delete from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)};"
+    )
     params = {
-        "source": "weather.hourly_djf plus weather.noaa_hourly_load_file",
+        "source": "weather.station_year_hourly_summary plus weather.noaa_hourly_load_file",
         "min_year": min_year,
         "max_year": max_year,
         "complete_threshold": complete_threshold,
         "session_work_mem": SESSION_WORK_MEM,
+        "snapshot_mode": snapshot_mode,
+        "target_table": target_table,
         "coverage_status_rule": "complete if coverage_ratio >= threshold, partial if valid_djf_hours > 0, otherwise empty",
     }
     return f"""
 \\set ON_ERROR_STOP on
 begin;
 set local work_mem = {sql_literal(SESSION_WORK_MEM)};
+
+create table if not exists weather.station_year_hourly_summary (
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    valid_djf_hours bigint not null,
+    min_hour_ending_utc timestamptz,
+    max_hour_ending_utc timestamptz,
+    refreshed_at_utc timestamptz not null default now(),
+    source_basis text not null,
+    primary key (station_id, source_year)
+);
+create index if not exists ix_station_year_hourly_summary_year
+    on weather.station_year_hourly_summary (source_year);
+
+do $$
+begin
+    if exists (
+        select 1
+        from weather.noaa_hourly_load_file
+        where file_status = 'loaded'
+          and source_year between {min_year} and {max_year}
+    )
+    and not exists (
+        select 1
+        from weather.station_year_hourly_summary
+        where source_year between {min_year} and {max_year}
+    ) then
+        raise exception 'weather.station_year_hourly_summary is empty for loaded NOAA files; run scripts/backfill_station_year_hourly_summary.py first';
+    end if;
+end $$;
 
 create table if not exists weather.station_year_djf_coverage (
     station_year_djf_coverage_id text primary key,
@@ -126,6 +177,36 @@ create index if not exists ix_station_year_djf_coverage_run_station_year
     on weather.station_year_djf_coverage (calculation_run_id, station_id, source_year);
 create index if not exists ix_station_year_djf_coverage_status
     on weather.station_year_djf_coverage (calculation_run_id, coverage_status);
+create index if not exists ix_noaa_hourly_load_file_status_year_station
+    on weather.noaa_hourly_load_file (file_status, source_year, station_id);
+
+create table if not exists weather.station_year_djf_coverage_current (
+    station_year_djf_coverage_id text primary key,
+    station_id text not null references weather.station(station_id),
+    source_year integer not null,
+    calculation_run_id text not null references audit.calculation_run(calculation_run_id),
+    period_start_utc timestamptz not null,
+    period_end_utc timestamptz not null,
+    expected_djf_hours bigint not null,
+    valid_djf_hours bigint not null,
+    missing_hour_count bigint not null,
+    loaded_file_count bigint not null,
+    invalid_temp_row_count bigint not null,
+    rejected_source_row_count bigint not null,
+    rejected_plausibility_row_count bigint not null,
+    duplicate_hour_count bigint not null,
+    coverage_ratio numeric,
+    coverage_status text not null,
+    notes text,
+    created_at_utc timestamptz not null default now(),
+    unique (station_id, source_year),
+    constraint station_year_djf_coverage_current_status_check
+        check (coverage_status in ('complete', 'partial', 'empty'))
+);
+create index if not exists ix_station_year_djf_coverage_current_run_station_year
+    on weather.station_year_djf_coverage_current (calculation_run_id, station_id, source_year);
+create index if not exists ix_station_year_djf_coverage_current_status
+    on weather.station_year_djf_coverage_current (calculation_run_id, coverage_status);
 
 insert into audit.calculation_run (
     calculation_run_id,
@@ -144,7 +225,7 @@ insert into audit.calculation_run (
     now(),
     'succeeded',
     {sql_literal(json.dumps(params, sort_keys=True))}::jsonb,
-    'Built station-year DJF coverage from hardened canonical NOAA hourly rows.'
+    'Built station-year DJF coverage from maintained NOAA hourly station-year summaries.'
 )
 on conflict (calculation_run_id) do update set
     run_finished_at_utc = excluded.run_finished_at_utc,
@@ -152,19 +233,21 @@ on conflict (calculation_run_id) do update set
     parameters_json = excluded.parameters_json,
     notes = excluded.notes;
 
+{prepare_target_sql}
+
 with years as (
     select generate_series({min_year}, {max_year})::integer as source_year
 ),
 expected as (
     select
         y.source_year,
-        make_timestamptz(y.source_year, 1, 1, 0, 0, 0, 'UTC') as period_start_utc,
-        make_timestamptz(y.source_year, 12, 31, 23, 0, 0, 'UTC') as period_end_utc,
+        make_timestamptz(y.source_year, 1, 1, 0, 0, 0.0, 'UTC') as period_start_utc,
+        make_timestamptz(y.source_year, 12, 31, 23, 0, 0.0, 'UTC') as period_end_utc,
         count(*) filter (where extract(month from gs.hour_utc at time zone 'UTC') in (12, 1, 2))::bigint as expected_djf_hours
     from years y
     cross join lateral generate_series(
-        make_timestamptz(y.source_year, 1, 1, 0, 0, 0, 'UTC'),
-        make_timestamptz(y.source_year, 12, 31, 23, 0, 0, 'UTC'),
+        make_timestamptz(y.source_year, 1, 1, 0, 0, 0.0, 'UTC'),
+        make_timestamptz(y.source_year, 12, 31, 23, 0, 0.0, 'UTC'),
         interval '1 hour'
     ) as gs(hour_utc)
     group by y.source_year
@@ -183,15 +266,13 @@ file_stats as (
       and source_year between {min_year} and {max_year}
     group by station_id, source_year
 ),
-hourly as (
+hourly_summary as (
     select
         station_id,
-        extract(year from hour_ending_utc at time zone 'UTC')::integer as source_year,
-        count(*)::bigint as valid_djf_hours
-    from weather.hourly_djf
-    where extract(month from hour_ending_utc at time zone 'UTC') in (12, 1, 2)
-      and extract(year from hour_ending_utc at time zone 'UTC')::integer between {min_year} and {max_year}
-    group by station_id, extract(year from hour_ending_utc at time zone 'UTC')::integer
+        source_year,
+        valid_djf_hours
+    from weather.station_year_hourly_summary
+    where source_year between {min_year} and {max_year}
 ),
 coverage as (
     select
@@ -210,11 +291,11 @@ coverage as (
         (coalesce(h.valid_djf_hours, 0)::numeric / nullif(e.expected_djf_hours, 0)) as coverage_ratio
     from file_stats fs
     join expected e using (source_year)
-    left join hourly h
+    left join hourly_summary h
       on h.station_id = fs.station_id
      and h.source_year = fs.source_year
 )
-insert into weather.station_year_djf_coverage (
+insert into {target_table} (
     station_year_djf_coverage_id,
     station_id,
     source_year,
@@ -254,51 +335,48 @@ select
         when coverage_ratio >= {complete_threshold} then 'complete'
         else 'partial'
     end as coverage_status,
-    'Coverage built from hardened canonical NOAA DJF rows. SOURCE=7 rows are rejected by the current loader default.' as notes
+    'Coverage built from maintained weather.station_year_hourly_summary rows. SOURCE=7 rows are rejected by the current loader default.' as notes
 from coverage
-on conflict (station_id, source_year, calculation_run_id) do update set
-    expected_djf_hours = excluded.expected_djf_hours,
-    valid_djf_hours = excluded.valid_djf_hours,
-    missing_hour_count = excluded.missing_hour_count,
-    loaded_file_count = excluded.loaded_file_count,
-    invalid_temp_row_count = excluded.invalid_temp_row_count,
-    rejected_source_row_count = excluded.rejected_source_row_count,
-    rejected_plausibility_row_count = excluded.rejected_plausibility_row_count,
-    duplicate_hour_count = excluded.duplicate_hour_count,
-    coverage_ratio = excluded.coverage_ratio,
-    coverage_status = excluded.coverage_status,
-    notes = excluded.notes;
+;
 
 commit;
 """
 
 
-def report_counts(psql: Path, host: str, port: int, dbname: str, run_id: str, user: str | None) -> OrderedDict[str, str]:
+def report_counts(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    run_id: str,
+    user: str | None,
+    coverage_table: str,
+) -> OrderedDict[str, str]:
     queries = OrderedDict(
         [
             (
                 "coverage rows for this run",
-                f"select count(*) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)};",
+                f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(run_id)};",
             ),
             (
                 "complete station-years",
-                f"select count(*) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'complete';",
+                f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'complete';",
             ),
             (
                 "partial station-years",
-                f"select count(*) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'partial';",
+                f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'partial';",
             ),
             (
                 "empty station-years",
-                f"select count(*) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'empty';",
+                f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(run_id)} and coverage_status = 'empty';",
             ),
             (
                 "valid DJF hours represented",
-                f"select coalesce(sum(valid_djf_hours),0) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)};",
+                f"select coalesce(sum(valid_djf_hours),0) from {coverage_table} where calculation_run_id = {sql_literal(run_id)};",
             ),
             (
                 "rejected source rows represented",
-                f"select coalesce(sum(rejected_source_row_count),0) from weather.station_year_djf_coverage where calculation_run_id = {sql_literal(run_id)};",
+                f"select coalesce(sum(rejected_source_row_count),0) from {coverage_table} where calculation_run_id = {sql_literal(run_id)};",
             ),
         ]
     )
@@ -315,6 +393,8 @@ def render_report(
     min_year: int,
     max_year: int,
     complete_threshold: float,
+    snapshot_mode: str,
+    coverage_table: str,
     db_counts: OrderedDict[str, str],
     by_year: list[dict[str, str]],
     host: str,
@@ -339,6 +419,8 @@ def render_report(
         f"- Code commit: `{code_commit}`",
         f"- Year range: `{min_year}-{max_year}`",
         f"- Complete threshold: `{complete_threshold}`",
+        f"- Snapshot mode: `{snapshot_mode}`",
+        f"- Coverage table: `{coverage_table}`",
         "",
         "## Summary",
         "",
@@ -358,6 +440,8 @@ def render_report(
             "## Interpretation",
             "",
             "- This is station-year coverage for the currently loaded canonical DJF table, not final plant ECWT.",
+            "- Valid-hour counts are read from `weather.station_year_hourly_summary`, which is maintained by the NOAA DJF loader and can be backfilled from `weather.hourly_djf` for existing rows.",
+            "- `current` snapshot mode replaces the compact operational coverage table; `historical` mode appends a milestone snapshot to the full audit table.",
             "- `complete` means `coverage_ratio >= complete_threshold`; this run uses the configured threshold above.",
             "- Coverage will change as more NOAA files are downloaded and loaded.",
             "",
@@ -377,14 +461,25 @@ def main() -> int:
     parser.add_argument("--min-year", type=int, default=2000)
     parser.add_argument("--max-year", type=int, default=2025)
     parser.add_argument("--complete-threshold", type=float, default=0.95)
+    parser.add_argument(
+        "--snapshot-mode",
+        choices=["current", "historical"],
+        default="current",
+        help="Write compact replaceable current coverage for batch loops, or append a historical milestone snapshot.",
+    )
     args = parser.parse_args()
 
     code_commit = git_commit_label(args.project_root)
     run_id = f"station_year_djf_coverage_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
-    sql = build_sql(run_id, code_commit, args.min_year, args.max_year, args.complete_threshold)
+    coverage_table = (
+        "weather.station_year_djf_coverage_current"
+        if args.snapshot_mode == "current"
+        else "weather.station_year_djf_coverage"
+    )
+    sql = build_sql(run_id, code_commit, args.min_year, args.max_year, args.complete_threshold, args.snapshot_mode)
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user), input_text=sql)
 
-    db_counts = report_counts(args.psql, args.host, args.port, args.dbname, run_id, args.user)
+    db_counts = report_counts(args.psql, args.host, args.port, args.dbname, run_id, args.user, coverage_table)
     by_year = psql_csv_query(
         args.psql,
         args.host,
@@ -397,7 +492,7 @@ def main() -> int:
             count(*) filter (where coverage_status = 'partial') as partial,
             count(*) filter (where coverage_status = 'empty') as empty,
             coalesce(sum(valid_djf_hours), 0) as valid_djf_hours
-        from weather.station_year_djf_coverage
+        from {coverage_table}
         where calculation_run_id = {sql_literal(run_id)}
         group by source_year
         order by source_year desc
@@ -412,6 +507,8 @@ def main() -> int:
         args.min_year,
         args.max_year,
         args.complete_threshold,
+        args.snapshot_mode,
+        coverage_table,
         db_counts,
         by_year,
         args.host,
