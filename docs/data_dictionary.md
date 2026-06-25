@@ -351,6 +351,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `passing_station_count_within_radius` | bigint | Evaluated stations within the maximum radius passing both coverage and loaded-year gates. |
 | `nearest_pass_radius_bucket_km` | numeric | Smallest configured radius bucket containing the nearest passing station. |
 | `nearest_pass_rank_order_within_radius` | integer | Rank of the nearest passing station among loaded stations sorted by plant distance. |
+| `nearest_pass_rank_order_all_stations` | integer | Rank of the nearest passing station among all geocoded NOAA station-history rows sorted by plant distance; this approximates the official nearest-station candidate-generator rank. |
 | `nearest_pass_station_id` | text | Nearest expanded-search station passing the scenario gates. |
 | `nearest_pass_distance_km` | numeric | Distance from plant to nearest passing expanded station. |
 | `nearest_pass_normalized_coverage_ratio` | numeric | Normalized active-window coverage ratio for the nearest passing station. |
@@ -371,6 +372,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `pass_rate` | numeric | Plants with passing station divided by total audited plants. |
 | `median_nearest_pass_distance_km` | numeric | Median nearest passing-station distance among pass rows. |
 | `median_nearest_pass_rank_order` | numeric | Median nearest passing-station rank among loaded stations. |
+| `median_nearest_pass_all_station_rank_order` | numeric | Median nearest passing-station rank among all geocoded NOAA station-history rows. |
 
 ## `calc.expanded_candidate_coverage_scenario_state_summary`
 

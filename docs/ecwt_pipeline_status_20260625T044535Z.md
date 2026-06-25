@@ -233,9 +233,12 @@ stations with provisional station ECWT rows and requires normalized active-windo
 coverage ratio and loaded-year ratio of at least `0.95`. For the 1,004
 near-threshold blockers, 995 have a passing station within 250 km, 1,000 within
 500 km, and 1,001 within 1,000 km. The median nearest passing station is rank 24
-among loaded stations, which explains why the current top-10 nearest-station
-candidate table misses this path. The 3 remaining no-pass rows are the Alaska
-plants Kake, Petersburg, and Wrangell.
+among loaded/provisional-ECWT stations and rank 26 among all NOAA station-history
+rows, which explains why the current top-10 nearest-station candidate table
+misses this path. If the candidate generator were expanded by nearest-station
+rank, top 50 would capture 927 of the 1,001 remediable rows, top 75 would capture
+995, and top 100 would capture 1,000; the last row requires rank 269. The 3
+remaining no-pass rows are the Alaska plants Kake, Petersburg, and Wrangell.
 
 ## Guardrail Added
 
