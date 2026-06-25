@@ -60,6 +60,12 @@ It filters the 162 all-plant readiness candidates to plants with at least one
 `OP`, `SB`, `OA`, or `OS` generator status, matching the documented first ECWT
 plant-scope rule.
 
+The first-operable scope itself is summarized in
+`first_operable_scope_diagnostic_20260625T045945Z.md`. The current database has
+13,370 first-scope plant rows covered by readiness, plus one open upstream EIA
+exception for generator plant code `68815`, which appears in the generator table
+but not the plant table.
+
 The 28 no-candidate plants are itemized in `no_candidate_plants_20260625T044535Z.csv`
 and summarized in `no_candidate_plants_20260625T044535Z_report.md`. All 28 lack
 plant coordinates and have only `CN` generator status.
