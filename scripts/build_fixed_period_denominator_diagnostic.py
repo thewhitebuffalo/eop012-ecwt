@@ -17,6 +17,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
 OPERABLE_STATUSES = ("OP", "SB", "OA", "OS")
 
 
@@ -75,6 +76,17 @@ def psql_csv_query(
     return list(csv.DictReader(io.StringIO(result.stdout)))
 
 
+def psql_execute(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    sql: str,
+) -> None:
+    run(psql_cmd(psql, host, port, dbname, user) + ["-c", sql])
+
+
 def write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -89,6 +101,55 @@ def git_commit_label(project_root: Path) -> str:
         return run(["git", "-C", str(project_root), "rev-parse", "HEAD"]).stdout.strip()
     except Exception:
         return "UNCOMMITTED_WORKTREE"
+
+
+def register_calculation_run(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    run_id: str,
+    code_commit: str,
+    run_started_at: datetime,
+    parameters: dict[str, object],
+) -> None:
+    psql_execute(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        insert into audit.calculation_run (
+            calculation_run_id,
+            methodology_version,
+            code_commit,
+            run_started_at_utc,
+            run_finished_at_utc,
+            run_status,
+            parameters_json,
+            notes
+        )
+        values (
+            {sql_literal(run_id)},
+            {sql_literal(METHODOLOGY_VERSION)},
+            {sql_literal(code_commit)},
+            {sql_literal(run_started_at.isoformat())}::timestamptz,
+            now(),
+            'succeeded',
+            {sql_literal(json.dumps(parameters, sort_keys=True))}::jsonb,
+            'Generated fixed-period denominator diagnostic comparing fixed-period and station-active-window coverage gates.'
+        )
+        on conflict (calculation_run_id) do update set
+            code_commit = excluded.code_commit,
+            run_started_at_utc = excluded.run_started_at_utc,
+            run_finished_at_utc = excluded.run_finished_at_utc,
+            run_status = excluded.run_status,
+            parameters_json = excluded.parameters_json,
+            notes = excluded.notes;
+        """,
+    )
 
 
 def latest_fixed_plant_ecwt_run_id(psql: Path, host: str, port: int, dbname: str, user: str | None) -> str:
@@ -904,6 +965,7 @@ def render_report(
 
 
 def main() -> None:
+    run_started_at = utc_now()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--psql", type=Path, default=PSQL)
@@ -989,6 +1051,34 @@ def main() -> None:
         args.plant_scope,
         detail_csv,
         rows,
+    )
+    register_calculation_run(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        run_id,
+        code_commit,
+        run_started_at,
+        {
+            "plant_scope": args.plant_scope,
+            "plant_ecwt_run_id": plant_ecwt_run_id,
+            "readiness_run_id": readiness_run_id,
+            "candidate_run_id": candidate_run_id,
+            "station_ecwt_run_id": station_ecwt_run_id,
+            "coverage_run_id": coverage_run_id,
+            "coverage_table": coverage_table,
+            "fixed_min_year": fixed_min_year,
+            "fixed_max_year": fixed_max_year,
+            "fixed_min_coverage_ratio": fixed_min_coverage_ratio,
+            "fixed_min_loaded_years": fixed_min_loaded_years,
+            "blocked_rows": len(rows),
+            "candidate_rows": len(candidates),
+            "coverage_rows": len(coverage_rows),
+            "detail_csv": str(detail_csv),
+            "report_path": str(report_path),
+        },
     )
     print(
         json.dumps(
