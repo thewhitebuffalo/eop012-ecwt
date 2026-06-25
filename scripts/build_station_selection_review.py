@@ -187,6 +187,7 @@ def build_sql(
     staging_csv: Path,
     review_cols: list[str],
     auto_accept_clean: bool,
+    operation_note: str = "Seeded station-selection review dispositions and built release-readiness gate.",
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
     params = {
@@ -272,7 +273,7 @@ insert into audit.calculation_run (
     now(),
     'succeeded',
     {sql_literal(json.dumps(params, sort_keys=True))}::jsonb,
-    'Seeded station-selection review dispositions and built release-readiness gate.'
+    {sql_literal(operation_note)}
 )
 on conflict (calculation_run_id) do update set
     run_finished_at_utc = excluded.run_finished_at_utc,
