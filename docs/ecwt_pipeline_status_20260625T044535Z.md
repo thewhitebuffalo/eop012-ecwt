@@ -56,6 +56,11 @@ The 28 no-candidate plants are itemized in `no_candidate_plants_20260625T044535Z
 and summarized in `no_candidate_plants_20260625T044535Z_report.md`. All 28 lack
 plant coordinates and have only `CN` generator status.
 
+The fixed-coverage blockers are summarized in
+`fixed_coverage_threshold_diagnostic_20260625T044535Z.md`. No blocked plant has
+best-candidate fixed-period coverage above 94%, so small coverage-threshold
+relaxations do not materially change readiness.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.
