@@ -1,6 +1,6 @@
 # ECWT Pipeline Status
 
-Generated UTC: 2026-06-25T05:49:12Z
+Generated UTC: 2026-06-25T05:53:57Z
 
 ## Current Checkpoint
 
@@ -13,6 +13,8 @@ Generated UTC: 2026-06-25T05:49:12Z
 | Fixed-period plant ECWT | `plant_ecwt_provisional_fixed_period_20260625T043543Z` | 16,132 plants |
 | Fixed-period readiness | `plant_ecwt_readiness_fixed_period_20260625T043609Z` | 162 all-plant candidates; 144 first-operable candidates |
 | Readiness policy scenario DB load | `readiness_policy_scenarios_db_load_20260625T054908Z` | 5 scenarios; 20,039 candidate rows |
+| Station-selection review seed | `station_selection_review_seed_20260625T055346Z` | 162 review rows; 0 release-ready rows |
+| Station-selection policy scenarios | `station_selection_policy_scenarios_20260625T055356Z` | 8 scenarios; 162 current fixed-period candidates |
 
 ## Plant Readiness
 
@@ -20,6 +22,7 @@ Generated UTC: 2026-06-25T05:49:12Z
 | --- | ---: |
 | Publication candidate, all-plant readiness run | 162 |
 | Publication candidate, first-operable export scope | 144 |
+| Current release-ready under station-review gate | 0 |
 | Blocked | 15,970 |
 
 ## NOAA Backfill State
@@ -136,6 +139,26 @@ Those scenario artifacts are now loaded into Postgres under
 `readiness_policy_scenarios_db_load_20260625T054908Z_report.md`; it records 5
 scenario rows, 20,039 scenario-candidate rows, and 2 hashed `audit.source_file`
 registrations.
+
+The station-selection review/release-readiness layer has been refreshed against
+the current fixed-period readiness run in
+`station_selection_review_seed_20260625T055346Z_report.md`, with review rows in
+`station_selection_review_seed_20260625T055346Z.csv`. The refreshed gate is
+intentionally conservative: all 162 current fixed-period publication candidates
+remain `needs_review`, so `publish.plant_ecwt_release_readiness` has 0
+`release_ready` rows for that run and 15,970 upstream readiness-blocked rows.
+The blocker split is 110 cross-border-station policy decisions, 24
+near-threshold-coverage reviews, 20 high-distance reviews, and 8 high-rank
+candidate reviews.
+
+The current station-selection policy decision surface is summarized in
+`station_selection_policy_scenarios_20260625T055356Z_report.md`, with scenario
+summary rows in `station_selection_policy_scenarios_20260625T055356Z.csv` and a
+row-level matrix in `station_selection_policy_scenarios_20260625T055356Z_matrix.csv`.
+This report is read-only and applies no policy override. It shows that the
+current gate accepts 0 rows, `us_ca_practical` would accept 108 rows, and
+`us_ca_distance_cap_150` or `fixed_coverage_only` would accept all 162 current
+fixed-period candidates if the methodology explicitly allowed those policies.
 
 ## Guardrail Added
 
