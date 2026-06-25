@@ -798,6 +798,7 @@ def render_report(
     if not file_rows:
         lines.append("- No candidate files were selected, so this run is an auditable no-op and loaded zero weather rows.")
     lines.append("")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
