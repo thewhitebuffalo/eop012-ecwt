@@ -14,6 +14,8 @@ from pathlib import Path
 from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+DEFAULT_TARGET_STATUSES = ("planned", "missing", "failed")
+ALLOWED_TARGET_STATUSES = ("planned", "missing", "failed", "downloaded")
 
 
 def utc_now() -> datetime:
@@ -116,6 +118,28 @@ def no_djf_overlap_condition() -> str:
     """
 
 
+def parse_statuses(raw: str, include_downloaded: bool) -> list[str]:
+    statuses: list[str] = []
+    for item in raw.split(","):
+        status = item.strip()
+        if not status:
+            continue
+        if status not in ALLOWED_TARGET_STATUSES:
+            allowed = ", ".join(ALLOWED_TARGET_STATUSES)
+            raise ValueError(f"Unsupported status {status!r}; expected one of: {allowed}")
+        if status not in statuses:
+            statuses.append(status)
+    if include_downloaded and "downloaded" not in statuses:
+        statuses.append("downloaded")
+    if not statuses:
+        raise ValueError("At least one target status is required.")
+    return statuses
+
+
+def sql_in_list(values: list[str] | tuple[str, ...]) -> str:
+    return ", ".join(sql_literal(value) for value in values)
+
+
 def summary_rows(
     psql: Path,
     host: str,
@@ -123,8 +147,10 @@ def summary_rows(
     dbname: str,
     user: str | None,
     manifest_run_id: str,
+    target_statuses: list[str],
 ) -> list[dict[str, str]]:
     condition = no_djf_overlap_condition()
+    status_list = sql_in_list(target_statuses)
     return psql_csv_query(
         psql,
         host,
@@ -136,6 +162,7 @@ def summary_rows(
             select
                 m.station_id,
                 m.source_year,
+                m.manifest_status,
                 m.station_candidate_plant_links,
                 m.batch_number,
                 m.priority_rank,
@@ -148,15 +175,26 @@ def summary_rows(
             from weather.noaa_raw_backfill_manifest m
             join weather.station st using (station_id)
             where m.calculation_run_id = {sql_literal(manifest_run_id)}
-              and m.manifest_status = 'planned'
         )
         select
-            count(*)::text as planned_rows,
-            count(*) filter (where no_djf_active_overlap)::text as rows_to_skip,
-            count(distinct station_id) filter (where no_djf_active_overlap)::text as stations_to_skip,
-            count(*) filter (where station_id like '999999-%')::text as planned_999999_rows,
-            count(*) filter (where station_id like '999999-%' and no_djf_active_overlap)::text as rows_999999_to_skip,
-            coalesce(sum(station_candidate_plant_links) filter (where no_djf_active_overlap), 0)::text as affected_candidate_links
+            count(*) filter (where manifest_status in ({status_list}))::text as target_rows_before_prune,
+            count(*) filter (where manifest_status in ({status_list}) and no_djf_active_overlap)::text as rows_to_skip,
+            count(distinct station_id) filter (
+                where manifest_status in ({status_list}) and no_djf_active_overlap
+            )::text as stations_to_skip,
+            count(*) filter (where no_djf_active_overlap)::text as all_no_djf_overlap_rows,
+            count(*) filter (where manifest_status = 'downloaded' and no_djf_active_overlap)::text
+                as downloaded_no_djf_overlap_rows,
+            count(*) filter (where station_id like '999999-%' and manifest_status in ({status_list}))::text
+                as target_999999_rows,
+            count(*) filter (
+                where station_id like '999999-%'
+                  and manifest_status in ({status_list})
+                  and no_djf_active_overlap
+            )::text as rows_999999_to_skip,
+            coalesce(sum(station_candidate_plant_links) filter (
+                where manifest_status in ({status_list}) and no_djf_active_overlap
+            ), 0)::text as affected_candidate_links
         from candidates
         """,
     )
@@ -169,9 +207,11 @@ def sample_rows(
     dbname: str,
     user: str | None,
     manifest_run_id: str,
+    target_statuses: list[str],
     limit: int,
 ) -> list[dict[str, str]]:
     condition = no_djf_overlap_condition()
+    status_list = sql_in_list(target_statuses)
     return psql_csv_query(
         psql,
         host,
@@ -182,6 +222,7 @@ def sample_rows(
         select
             m.station_id,
             m.source_year::text as source_year,
+            m.manifest_status,
             st.station_name,
             st.state,
             st.country,
@@ -193,9 +234,9 @@ def sample_rows(
         from weather.noaa_raw_backfill_manifest m
         join weather.station st using (station_id)
         where m.calculation_run_id = {sql_literal(manifest_run_id)}
-          and m.manifest_status = 'planned'
+          and m.manifest_status in ({status_list})
           and {condition}
-        order by m.station_candidate_plant_links desc, m.priority_rank, m.station_id, m.source_year
+        order by m.station_candidate_plant_links desc, m.manifest_status, m.priority_rank, m.station_id, m.source_year
         limit {int(limit)}
         """,
     )
@@ -227,6 +268,10 @@ def status_rows(
 
 def update_sql(run_id: str, manifest_run_id: str, code_commit: str, dry_run: bool, params: dict[str, object]) -> str:
     condition = no_djf_overlap_condition()
+    target_statuses = params["target_statuses"]
+    if not isinstance(target_statuses, list):
+        raise TypeError("target_statuses must be a list")
+    status_list = sql_in_list(target_statuses)
     started = utc_now().isoformat(timespec="seconds")
     if dry_run:
         update_stmt = "-- Dry run; no manifest rows updated."
@@ -238,12 +283,13 @@ def update_sql(run_id: str, manifest_run_id: str, code_commit: str, dry_run: boo
             notes = concat_ws(
                 '; ',
                 nullif(m.notes, ''),
-                'Skipped by active-window prune: station has no Jan-Feb or Dec observation overlap for source year.'
+                'Skipped by active-window prune from manifest_status=' || m.manifest_status
+                    || ': station has no Jan-Feb or Dec observation overlap for source year.'
             )
         from weather.station st
         where st.station_id = m.station_id
           and m.calculation_run_id = {sql_literal(manifest_run_id)}
-          and m.manifest_status = 'planned'
+          and m.manifest_status in ({status_list})
           and {condition};
         """
     return f"""
@@ -268,7 +314,7 @@ def update_sql(run_id: str, manifest_run_id: str, code_commit: str, dry_run: boo
         now(),
         'succeeded',
         {sql_literal(json.dumps(params, sort_keys=True))}::jsonb,
-        'Pruned planned NOAA backfill manifest rows outside station active DJF observation windows.'
+        'Pruned NOAA backfill manifest rows outside station active DJF observation windows.'
     )
     on conflict (calculation_run_id) do update set
         run_finished_at_utc = excluded.run_finished_at_utc,
@@ -285,6 +331,7 @@ def render_report(
     run_id: str,
     manifest_run_id: str,
     dry_run: bool,
+    target_statuses: list[str],
     before_summary: dict[str, str],
     after_status: list[dict[str, str]],
     sample: list[dict[str, str]],
@@ -300,15 +347,18 @@ def render_report(
         f"- Manifest run ID: `{manifest_run_id}`",
         f"- Dry run: `{dry_run}`",
         f"- Methodology version: `{METHODOLOGY_VERSION}`",
+        f"- Target statuses: `{', '.join(target_statuses)}`",
         "",
         "## Summary",
         "",
         "| Metric | Count |",
         "| --- | ---: |",
-        f"| Planned rows before prune | {before_summary['planned_rows']} |",
-        f"| Rows with no station active DJF overlap | {before_summary['rows_to_skip']} |",
+        f"| Target-status rows before prune | {before_summary['target_rows_before_prune']} |",
+        f"| Target-status rows with no station active DJF overlap | {before_summary['rows_to_skip']} |",
         f"| Distinct stations affected | {before_summary['stations_to_skip']} |",
-        f"| Planned `999999-*` rows before prune | {before_summary['planned_999999_rows']} |",
+        f"| All manifest rows with no station active DJF overlap | {before_summary['all_no_djf_overlap_rows']} |",
+        f"| Downloaded rows with no station active DJF overlap | {before_summary['downloaded_no_djf_overlap_rows']} |",
+        f"| Target-status `999999-*` rows before prune | {before_summary['target_999999_rows']} |",
         f"| `999999-*` rows skipped by active window | {before_summary['rows_999999_to_skip']} |",
         f"| Candidate plant links represented by skipped rows | {before_summary['affected_candidate_links']} |",
         "",
@@ -324,8 +374,8 @@ def render_report(
             "",
             "## Sample Skipped Rows",
             "",
-            "| Station | Year | Name | State | First Observation | Last Observation | Candidate Links | Batch | Rank |",
-            "| --- | ---: | --- | --- | --- | --- | ---: | ---: | ---: |",
+            "| Station | Year | Previous Status | Name | State | First Observation | Last Observation | Candidate Links | Batch | Rank |",
+            "| --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: |",
         ]
     )
     if sample:
@@ -334,6 +384,7 @@ def render_report(
                 "| "
                 f"`{row['station_id']}` | "
                 f"{row['source_year']} | "
+                f"`{row['manifest_status']}` | "
                 f"{row['station_name']} | "
                 f"{row['state']} | "
                 f"{row['first_observation_utc']} | "
@@ -343,13 +394,14 @@ def render_report(
                 f"{row['priority_rank']} |"
             )
     else:
-        lines.append("| No rows matched. |  |  |  |  |  |  |  |  |")
+        lines.append("| No rows matched. |  |  |  |  |  |  |  |  |  |")
     lines.extend(
         [
             "",
             "## Interpretation",
             "",
             "- A row is skipped only when station metadata proves there is no overlap with January-February or December for that source year.",
+            "- By default this repairs `planned`, `missing`, and `failed` rows. `downloaded` rows are counted but not reclassified unless explicitly requested, because the download-attempt audit still truthfully records a fetched raw object.",
             "- `999999-*` station IDs are not globally invalid. NOAA Global Hourly contains valid WBAN-only station files using the `999999` USAF placeholder.",
             "- This prune prevents known out-of-active-window station-years from consuming public AWS requests while preserving valid `999999-*` stations.",
         ]
@@ -369,21 +421,42 @@ def main() -> None:
     parser.add_argument("--manifest-run-id")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sample-limit", type=int, default=25)
+    parser.add_argument(
+        "--statuses",
+        default=",".join(DEFAULT_TARGET_STATUSES),
+        help="Comma-separated manifest statuses to reclassify as skipped when no DJF active-window overlap exists.",
+    )
+    parser.add_argument(
+        "--include-downloaded",
+        action="store_true",
+        help="Also reclassify downloaded rows with no DJF active-window overlap. Default preserves downloaded audit status.",
+    )
     args = parser.parse_args()
 
     manifest_run_id = args.manifest_run_id or latest_manifest_run_id(
         args.psql, args.host, args.port, args.dbname, args.user
     )
+    target_statuses = parse_statuses(args.statuses, args.include_downloaded)
     run_id = f"noaa_manifest_active_window_prune_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     code_commit = git_commit_label(args.project_root)
-    before = summary_rows(args.psql, args.host, args.port, args.dbname, args.user, manifest_run_id)[0]
-    sample = sample_rows(args.psql, args.host, args.port, args.dbname, args.user, manifest_run_id, args.sample_limit)
+    before = summary_rows(args.psql, args.host, args.port, args.dbname, args.user, manifest_run_id, target_statuses)[0]
+    sample = sample_rows(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        manifest_run_id,
+        target_statuses,
+        args.sample_limit,
+    )
     params = {
         "manifest_run_id": manifest_run_id,
         "dry_run": args.dry_run,
         "sample_limit": args.sample_limit,
+        "target_statuses": target_statuses,
         "rows_to_skip": int(before["rows_to_skip"]),
-        "prune_rule": "skip planned rows where station active window has no Jan-Feb or Dec overlap for source year",
+        "prune_rule": "skip target-status rows where station active window has no Jan-Feb or Dec overlap for source year",
     }
     run(
         psql_cmd(args.psql, args.host, args.port, args.dbname, args.user),
@@ -391,16 +464,18 @@ def main() -> None:
     )
     after = status_rows(args.psql, args.host, args.port, args.dbname, args.user, manifest_run_id)
     report_path = args.project_root / "docs" / f"{run_id}_report.md"
-    render_report(report_path, run_id, manifest_run_id, args.dry_run, before, after, sample)
+    render_report(report_path, run_id, manifest_run_id, args.dry_run, target_statuses, before, after, sample)
     print(
         json.dumps(
             {
                 "run_id": run_id,
                 "manifest_run_id": manifest_run_id,
                 "dry_run": args.dry_run,
+                "target_statuses": target_statuses,
                 "rows_to_skip": int(before["rows_to_skip"]),
                 "stations_to_skip": int(before["stations_to_skip"]),
                 "rows_999999_to_skip": int(before["rows_999999_to_skip"]),
+                "downloaded_no_djf_overlap_rows": int(before["downloaded_no_djf_overlap_rows"]),
                 "report_path": str(report_path),
             },
             indent=2,
