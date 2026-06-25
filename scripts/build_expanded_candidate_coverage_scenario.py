@@ -292,7 +292,6 @@ def fetch_station_rows(
     port: int,
     dbname: str,
     user: str | None,
-    coverage_run_id: str,
     station_ecwt_run_id: str,
 ) -> list[dict[str, str]]:
     return psql_csv_query(
@@ -311,31 +310,14 @@ def fetch_station_rows(
             s.longitude::text,
             s.elevation_m::text,
             s.first_observation_utc::text,
-            s.last_observation_utc::text,
-            min(c.source_year) filter (where c.loaded_file_count > 0)::text as first_loaded_year,
-            max(c.source_year) filter (where c.loaded_file_count > 0)::text as last_loaded_year
+            s.last_observation_utc::text
         from weather.station s
-        join weather.station_year_djf_coverage c
-          on c.station_id = s.station_id
-         and c.calculation_run_id = {sql_literal(coverage_run_id)}
         join calc.station_ecwt se
           on se.station_id = s.station_id
          and se.calculation_run_id = {sql_literal(station_ecwt_run_id)}
          and se.result_status = 'provisional'
         where s.latitude is not null
           and s.longitude is not null
-          and c.source_year between 2000 and 2025
-        group by
-            s.station_id,
-            s.station_name,
-            s.state,
-            s.country,
-            s.latitude,
-            s.longitude,
-            s.elevation_m,
-            s.first_observation_utc,
-            s.last_observation_utc
-        having sum(c.valid_djf_hours) > 0
         """,
     )
 
@@ -390,8 +372,12 @@ def build_station_metrics(
         station_id = station["station_id"]
         first_obs = parse_ts(station.get("first_observation_utc"))
         last_obs = parse_ts(station.get("last_observation_utc"))
-        first_loaded_year = int_value(station.get("first_loaded_year"), 0) or None
-        last_loaded_year = int_value(station.get("last_loaded_year"), 0) or None
+        station_coverage = coverage_rows.get(station_id, {})
+        loaded_year_values = [
+            year for year, row in station_coverage.items() if int_value(row.get("loaded_file_count")) > 0
+        ]
+        first_loaded_year = min(loaded_year_values) if loaded_year_values else None
+        last_loaded_year = max(loaded_year_values) if loaded_year_values else None
         loaded_start = datetime(first_loaded_year, 1, 1, tzinfo=timezone.utc) if first_loaded_year else None
         loaded_end = datetime(last_loaded_year, 12, 31, 23, tzinfo=timezone.utc) if last_loaded_year else None
         normalized_first = min([dt for dt in (first_obs, loaded_start) if dt is not None], default=None)
@@ -405,7 +391,7 @@ def build_station_metrics(
             if expected_hours <= 0:
                 continue
             active_years += 1
-            coverage = coverage_rows.get(station_id, {}).get(year)
+            coverage = station_coverage.get(year)
             if coverage:
                 valid += int_value(coverage.get("valid_djf_hours"))
                 if int_value(coverage.get("loaded_file_count")) > 0:
@@ -1203,7 +1189,7 @@ def main() -> int:
 
     plants = fetch_priority_rows(args.psql, args.host, args.port, args.dbname, args.user, priority_run_id, args.max_gap_hours)
     station_ecwt = fetch_station_ecwt_rows(args.psql, args.host, args.port, args.dbname, args.user, station_ecwt_run_id)
-    stations = fetch_station_rows(args.psql, args.host, args.port, args.dbname, args.user, coverage_run_id, station_ecwt_run_id)
+    stations = fetch_station_rows(args.psql, args.host, args.port, args.dbname, args.user, station_ecwt_run_id)
     coverage = fetch_coverage_rows(
         args.psql,
         args.host,
