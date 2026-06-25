@@ -16,6 +16,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+FIRST_SCOPE_STATUSES = ("OP", "SB", "OA", "OS")
 
 
 def utc_now() -> datetime:
@@ -26,6 +27,10 @@ def sql_literal(value: object) -> str:
     if value is None:
         return "null"
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def sql_list(values: Iterable[object]) -> str:
+    return ", ".join(sql_literal(value) for value in values)
 
 
 def pg_csv_value(value: object) -> object:
@@ -128,7 +133,12 @@ def export_rows(
     user: str | None,
     readiness_run_id: str,
     release_id: str,
+    plant_scope: str,
 ) -> list[dict[str, str]]:
+    first_scope_statuses_sql = sql_list(FIRST_SCOPE_STATUSES)
+    scope_filter = ""
+    if plant_scope == "first-operable":
+        scope_filter = "and pscope.in_first_scope"
     return psql_csv_query(
         psql,
         host,
@@ -136,8 +146,24 @@ def export_rows(
         dbname,
         user,
         f"""
+        with plant_generator_scope as (
+            select
+                p.plant_id,
+                coalesce(string_agg(distinct g.status, ',' order by g.status), '') as generator_statuses,
+                count(g.*)::text as total_generator_count,
+                coalesce(round(sum(g.nameplate_capacity_mw), 3), 0)::text as total_nameplate_mw,
+                count(g.*) filter (where g.status in ({first_scope_statuses_sql}))::text as first_scope_generator_count,
+                coalesce(round(sum(g.nameplate_capacity_mw) filter (where g.status in ({first_scope_statuses_sql})), 3), 0)::text
+                    as first_scope_nameplate_mw,
+                coalesce(bool_or(g.status in ({first_scope_statuses_sql})), false) as in_first_scope
+            from asset.plant p
+            left join asset.generator g
+              on g.eia_plant_code = p.eia_plant_code
+            group by p.plant_id
+        )
         select
             {sql_literal(release_id)} as release_id,
+            {sql_literal(plant_scope)} as plant_scope,
             r.calculation_run_id as readiness_run_id,
             pe.calculation_run_id as plant_ecwt_run_id,
             pe.methodology_version,
@@ -155,6 +181,11 @@ def export_rows(
             p.balancing_authority_code,
             p.balancing_authority_name,
             p.sector_name,
+            pscope.generator_statuses,
+            pscope.total_generator_count,
+            pscope.total_nameplate_mw,
+            pscope.first_scope_generator_count,
+            pscope.first_scope_nameplate_mw,
             r.selected_station_id,
             st.station_name as selected_station_name,
             st.state as selected_station_state,
@@ -188,10 +219,13 @@ def export_rows(
           on cr.calculation_run_id = r.calculation_run_id
         join asset.plant p
           on p.plant_id = r.plant_id
+        join plant_generator_scope pscope
+          on pscope.plant_id = r.plant_id
         left join weather.station st
           on st.station_id = r.selected_station_id
         where r.calculation_run_id = {sql_literal(readiness_run_id)}
           and r.readiness_status = 'publication_candidate'
+          {scope_filter}
         order by p.state, p.eia_plant_code::integer nulls last, p.plant_name
         """,
     )
@@ -237,6 +271,7 @@ def render_report(
     release_id: str,
     code_commit: str,
     readiness_run_id: str,
+    plant_scope: str,
     csv_path: Path,
     rows: list[dict[str, str]],
     summary_rows: list[dict[str, str]],
@@ -256,6 +291,7 @@ def render_report(
         f"- Release ID: `{release_id}`",
         f"- Code commit: `{code_commit}`",
         f"- Strict readiness run ID: `{readiness_run_id}`",
+        f"- Plant scope: `{plant_scope}`",
         f"- CSV preview: `{csv_path.name}`",
         "",
         "## Summary",
@@ -293,6 +329,7 @@ def render_report(
             "",
             "- This is a preview export of rows that passed the current strict publication gate, not a final compliance release.",
             "- The CSV intentionally excludes provisional low-coverage and blocked rows.",
+            "- `first-operable` scope means plants with at least one `OP`, `SB`, `OA`, or `OS` generator status.",
             "- Raw NOAA files and the Postgres database are not included in Git; source lineage and run IDs are retained for reproducibility.",
             "- Before a national release, QA must close out plausibility rejects, warm station ECWT outliers, and station-selection review.",
         ]
@@ -311,19 +348,36 @@ def main() -> None:
     parser.add_argument("--user")
     parser.add_argument("--readiness-run-id")
     parser.add_argument("--release-id")
+    parser.add_argument(
+        "--plant-scope",
+        choices=("all-plants", "first-operable"),
+        default="all-plants",
+        help="Filter publication candidates by plant/generator scope.",
+    )
     args = parser.parse_args()
 
     readiness_run_id = args.readiness_run_id or latest_strict_readiness_run_id(
         args.psql, args.host, args.port, args.dbname, args.user
     )
-    run_id = f"plant_ecwt_publication_candidates_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    scope_slug = "" if args.plant_scope == "all-plants" else f"{args.plant_scope.replace('-', '_')}_"
+    run_id = f"plant_ecwt_publication_candidates_{scope_slug}{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     release_id = args.release_id or f"preview-{run_id}"
     code_commit = git_commit_label(args.project_root)
-    rows = export_rows(args.psql, args.host, args.port, args.dbname, args.user, readiness_run_id, release_id)
+    rows = export_rows(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        readiness_run_id,
+        release_id,
+        args.plant_scope,
+    )
     docs_dir = args.project_root / "docs"
     csv_path = docs_dir / f"{run_id}.csv"
     fieldnames = [
         "release_id",
+        "plant_scope",
         "readiness_run_id",
         "plant_ecwt_run_id",
         "methodology_version",
@@ -341,6 +395,11 @@ def main() -> None:
         "balancing_authority_code",
         "balancing_authority_name",
         "sector_name",
+        "generator_statuses",
+        "total_generator_count",
+        "total_nameplate_mw",
+        "first_scope_generator_count",
+        "first_scope_nameplate_mw",
         "selected_station_id",
         "selected_station_name",
         "selected_station_state",
@@ -371,7 +430,7 @@ def main() -> None:
     write_csv(csv_path, fieldnames, rows)
     summary = readiness_summary(args.psql, args.host, args.port, args.dbname, args.user, readiness_run_id)
     report_path = docs_dir / f"{run_id}_report.md"
-    render_report(report_path, run_id, release_id, code_commit, readiness_run_id, csv_path, rows, summary)
+    render_report(report_path, run_id, release_id, code_commit, readiness_run_id, args.plant_scope, csv_path, rows, summary)
     print(
         json.dumps(
             OrderedDict(
@@ -379,6 +438,7 @@ def main() -> None:
                     ("run_id", run_id),
                     ("release_id", release_id),
                     ("readiness_run_id", readiness_run_id),
+                    ("plant_scope", args.plant_scope),
                     ("rows_exported", len(rows)),
                     ("csv_path", str(csv_path)),
                     ("report_path", str(report_path)),
