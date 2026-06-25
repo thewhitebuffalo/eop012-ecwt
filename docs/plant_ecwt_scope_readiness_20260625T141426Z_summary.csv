@@ -1,0 +1,11 @@
+scope_audit_run_id,metric,value,notes
+plant_ecwt_scope_readiness_20260625T141426Z,asset.plant rows,16132,
+plant_ecwt_scope_readiness_20260625T141426Z,generator-derived first-operable plant ids,13371,
+plant_ecwt_scope_readiness_20260625T141426Z,generator-derived first-operable ids with asset.plant rows,13370,
+plant_ecwt_scope_readiness_20260625T141426Z,generator-derived first-operable ids missing asset.plant rows,1,These first-operable generator plant IDs cannot be station-matched until plant identity/location is resolved.
+plant_ecwt_scope_readiness_20260625T141426Z,policy result rows,16132,
+plant_ecwt_scope_readiness_20260625T141426Z,policy result first-operable rows,13370,
+plant_ecwt_scope_readiness_20260625T141426Z,first-operable publication candidates,13355,
+plant_ecwt_scope_readiness_20260625T141426Z,first-operable blocked rows,15,
+plant_ecwt_scope_readiness_20260625T141426Z,exception review plant_geocode_required,28,"These are all construction-only asset.plant rows, not first-operable publication blockers."
+plant_ecwt_scope_readiness_20260625T141426Z,exception review coverage_threshold_exception_review,15,These are the remaining first-operable ECWT blockers after normalized active-window policy materialization.
