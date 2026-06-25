@@ -11,13 +11,14 @@ Generated UTC: 2026-06-25T04:45:35Z
 | Station-year DJF coverage | `station_year_djf_coverage_20260625T035921Z` | 62,318 station-years |
 | Station ECWT | `station_ecwt_loaded_20260625T042423Z` | 4,250 stations |
 | Fixed-period plant ECWT | `plant_ecwt_provisional_fixed_period_20260625T043543Z` | 16,132 plants |
-| Fixed-period readiness | `plant_ecwt_readiness_fixed_period_20260625T043609Z` | 162 publication candidates |
+| Fixed-period readiness | `plant_ecwt_readiness_fixed_period_20260625T043609Z` | 162 all-plant candidates; 144 first-operable candidates |
 
 ## Plant Readiness
 
 | Status | Plants |
 | --- | ---: |
-| Publication candidate | 162 |
+| Publication candidate, all-plant readiness run | 162 |
+| Publication candidate, first-operable export scope | 144 |
 | Blocked | 15,970 |
 
 ## NOAA Backfill State
@@ -50,7 +51,14 @@ The next useful work is no longer bulk AWS download. It is station-selection and
 1. Review whether the fixed `2000-2025`, 95% coverage, 20-loaded-year gate is the intended publication gate for every plant class.
 2. Prioritize the 15,923 fixed-coverage blockers by best available coverage, distance, NERC region, and plant criticality.
 3. Resolve the 28 no-candidate plants by fixing missing plant coordinates or excluding placeholder/unsited plant records from the publication universe.
-4. Decide how to publish the 162 current publication candidates: as preview candidates, not final compliance output, until station-selection review is complete.
+4. Decide how to publish the 144 first-operable current publication candidates: as preview candidates, not final compliance output, until station-selection review is complete.
+
+The first-operable scoped publication-candidate export is
+`plant_ecwt_publication_candidates_first_operable_20260625T045722Z.csv`,
+with report `plant_ecwt_publication_candidates_first_operable_20260625T045722Z_report.md`.
+It filters the 162 all-plant readiness candidates to plants with at least one
+`OP`, `SB`, `OA`, or `OS` generator status, matching the documented first ECWT
+plant-scope rule.
 
 The 28 no-candidate plants are itemized in `no_candidate_plants_20260625T044535Z.csv`
 and summarized in `no_candidate_plants_20260625T044535Z_report.md`. All 28 lack
