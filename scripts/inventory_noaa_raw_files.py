@@ -109,12 +109,62 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def dedupe_paths(paths: Iterable[Path]) -> list[Path]:
+    deduped: OrderedDict[str, Path] = OrderedDict()
+    for path in paths:
+        expanded = path.expanduser()
+        deduped.setdefault(str(expanded), expanded)
+    return list(deduped.values())
+
+
 def git_commit_label(project_root: Path) -> str:
     try:
         result = run(["git", "-C", str(project_root), "rev-parse", "HEAD"])
         return result.stdout.strip()
     except Exception:
         return "UNCOMMITTED_WORKTREE"
+
+
+def relation_exists(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    relation_name: str,
+) -> bool:
+    exists = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        f"select to_regclass({sql_literal(relation_name)}) is not null;",
+        user,
+    )
+    return exists.lower() in {"t", "true", "1"}
+
+
+def loaded_noaa_raw_roots(psql: Path, host: str, port: int, dbname: str, user: str | None) -> list[Path]:
+    if not relation_exists(psql, host, port, dbname, user, "weather.noaa_hourly_load_file"):
+        return []
+    rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        """
+        select
+            regexp_replace(local_path, '/[0-9]{4}/[^/]+(\\.gz)?$', '') as raw_root,
+            count(*)::text as loaded_file_count
+        from weather.noaa_hourly_load_file
+        where local_path is not null
+          and local_path like '/%'
+        group by 1
+        order by count(*) desc, raw_root
+        """,
+        user,
+    )
+    return dedupe_paths(Path(row["raw_root"]) for row in rows if row.get("raw_root"))
 
 
 def latest_candidate_run_id(psql: Path, host: str, port: int, dbname: str, user: str | None) -> str:
@@ -608,6 +658,8 @@ def render_report(
     code_commit: str,
     source_row: dict[str, object],
     raw_roots: list[Path],
+    loaded_raw_roots: list[Path],
+    auto_included_loaded_roots: list[Path],
     start_year: int,
     end_year: int,
     stats: dict[str, object],
@@ -646,6 +698,14 @@ def render_report(
     ]
     for root in raw_roots:
         lines.append(f"- `{root}`")
+    if loaded_raw_roots:
+        lines.extend(["", "Previously loaded NOAA roots observed in this database:", ""])
+        for root in loaded_raw_roots:
+            lines.append(f"- `{root}`")
+    if auto_included_loaded_roots:
+        lines.extend(["", "Loaded roots auto-included in this inventory:", ""])
+        for root in auto_included_loaded_roots:
+            lines.append(f"- `{root}`")
     lines.extend(
         [
             "",
@@ -723,12 +783,24 @@ def main() -> int:
     parser.add_argument("--start-year", type=int, default=2000)
     parser.add_argument("--end-year", type=int, default=2025)
     parser.add_argument("--raw-root", type=Path, action="append", default=None)
+    parser.add_argument(
+        "--no-include-loaded-roots",
+        action="store_true",
+        help="Do not auto-include NOAA raw roots already referenced by weather.noaa_hourly_load_file.",
+    )
     args = parser.parse_args()
 
     if not args.psql.exists():
         raise FileNotFoundError(args.psql)
 
-    raw_roots = args.raw_root or DEFAULT_RAW_ROOTS
+    raw_roots = dedupe_paths(args.raw_root or DEFAULT_RAW_ROOTS)
+    loaded_raw_roots: list[Path] = []
+    auto_included_loaded_roots: list[Path] = []
+    if not args.no_include_loaded_roots:
+        loaded_raw_roots = [root for root in loaded_noaa_raw_roots(args.psql, args.host, args.port, args.dbname, args.user) if root.exists()]
+        configured_root_keys = {str(root) for root in raw_roots}
+        auto_included_loaded_roots = [root for root in loaded_raw_roots if str(root) not in configured_root_keys]
+        raw_roots = dedupe_paths([*raw_roots, *auto_included_loaded_roots])
     candidate_run_id = args.candidate_run_id or latest_candidate_run_id(
         args.psql, args.host, args.port, args.dbname, args.user
     )
@@ -796,6 +868,9 @@ def main() -> int:
         "start_year": args.start_year,
         "end_year": args.end_year,
         "raw_roots": [str(root) for root in raw_roots],
+        "include_loaded_roots": not args.no_include_loaded_roots,
+        "loaded_raw_roots_seen": [str(root) for root in loaded_raw_roots],
+        "auto_included_loaded_roots": [str(root) for root in auto_included_loaded_roots],
         "raw_station_id_rule": "remove hyphen from NOAA ISD USAF-WBAN station_id",
         "hashing": "file presence, size, and mtime only; full raw-file hashing deferred",
     }
@@ -813,6 +888,8 @@ def main() -> int:
         code_commit,
         source_row,
         raw_roots,
+        loaded_raw_roots,
+        auto_included_loaded_roots,
         args.start_year,
         args.end_year,
         stats,

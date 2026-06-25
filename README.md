@@ -28,6 +28,7 @@ Key paths:
 - `EOP012_EIA860_ZIP`: EIA-860 2024 final ZIP.
 - `EOP012_STAGING_ROOT`: generated CSV staging directory.
 - `EOP012_NOAA_GLOBAL_HOURLY_ROOT`: NOAA Global Hourly raw-file cache.
+- `EOP012_NOAA_RAW_ROOTS`: colon-separated NOAA raw-file cache roots used by inventory scans.
 - `EOP012_PSQL`: PostgreSQL `psql` client binary.
 
 ## Immediate Baseline

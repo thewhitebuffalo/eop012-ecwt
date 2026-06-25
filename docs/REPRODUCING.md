@@ -75,7 +75,7 @@ still take precedence for one-off runs.
 | `EOP012_EIA860_ZIP` | EIA-860 2024 final ZIP downloaded from EIA. |
 | `EOP012_STAGING_ROOT` | Generated CSV staging directory used before database loads. |
 | `EOP012_NOAA_GLOBAL_HOURLY_ROOT` | NOAA Global Hourly raw CSV/GZ cache. |
-| `EOP012_NOAA_RAW_ROOTS` | Optional colon-separated list of NOAA raw roots for inventory scans. |
+| `EOP012_NOAA_RAW_ROOTS` | Colon-separated NOAA raw roots for inventory scans. Include every local cache root that may already contain station-year CSVs. |
 | `EOP012_STATION_HISTORY_CSV` | NOAA ISD station-history CSV cache path. |
 | `EOP012_SOURCE_CLUSTER_PATH` | Optional legacy/source Postgres cluster used by coverage-audit bridge scripts. |
 | `EOP012_PSQL` | PostgreSQL `psql` client binary; use an absolute path if it is not on `PATH`. |
@@ -367,13 +367,17 @@ python "$REPO/scripts/inventory_noaa_raw_files.py" \
   --end-year 2025
 ```
 
-Default raw roots, in priority order:
+Set `EOP012_NOAA_RAW_ROOTS` or pass repeated `--raw-root` flags when NOAA files
+are split across several local caches. The inventory script also auto-includes
+existing roots found in `weather.noaa_hourly_load_file` unless
+`--no-include-loaded-roots` is supplied; this prevents an incremental rebuild
+from planning duplicate AWS downloads for files already loaded from another
+cache root.
+
+Example multi-root setting:
 
 ```text
-/Volumes/NOAA_CACHE/noaa-global-hourly-pds-full
-/Volumes/NOAA_CACHE/noaa-global-hourly-year-staging
-/Volumes/NOAA_CACHE/noaa-global-hourly-unified
-/Volumes/NOAA_CACHE/BACKUP_TO_DELETE_LATER_noaa-cache_2026-02-19
+export EOP012_NOAA_RAW_ROOTS="$EOP012_DATA_ROOT/raw/noaa/global-hourly:/Volumes/NOAA_CACHE/noaa-global-hourly-pds-full:/Volumes/NOAA_CACHE/noaa-global-hourly-year-staging"
 ```
 
 Expected outputs:
