@@ -139,6 +139,44 @@ def latest_inventory_run_id(psql: Path, host: str, port: int, dbname: str, user:
     return run_id
 
 
+def relation_exists(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    relation_name: str,
+) -> bool:
+    exists = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        f"select to_regclass({sql_literal(relation_name)}) is not null;",
+        user,
+    )
+    return exists.lower() in {"t", "true", "1"}
+
+
+def ensure_download_attempt_lookup_index(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+) -> None:
+    run(
+        psql_cmd(psql, host, port, dbname, user)
+        + [
+            "-c",
+            """
+            create index if not exists ix_noaa_raw_download_attempt_station_year_status
+                on weather.noaa_raw_download_attempt (station_id, source_year, raw_station_id, download_status);
+            """,
+        ]
+    )
+
+
 def missing_inventory_rows(
     psql: Path,
     host: str,
@@ -146,7 +184,23 @@ def missing_inventory_rows(
     dbname: str,
     user: str | None,
     inventory_run_id: str,
+    include_known_missing_aws: bool,
 ) -> list[dict[str, str]]:
+    known_missing_filter = ""
+    if not include_known_missing_aws and relation_exists(
+        psql, host, port, dbname, user, "weather.noaa_raw_download_attempt"
+    ):
+        ensure_download_attempt_lookup_index(psql, host, port, dbname, user)
+        known_missing_filter = """
+          and not exists (
+              select 1
+              from weather.noaa_raw_download_attempt attempt
+              where attempt.station_id = i.station_id
+                and attempt.source_year = i.source_year
+                and attempt.raw_station_id = i.raw_station_id
+                and attempt.download_status = 'missing_on_aws'
+          )
+        """
     return psql_csv_query(
         psql,
         host,
@@ -197,6 +251,7 @@ def missing_inventory_rows(
                 and st.last_observation_utc >= make_timestamptz(i.source_year, 12, 1, 0, 0, 0, 'UTC')
             )
           )
+          {known_missing_filter}
         """,
         user,
     )
@@ -557,6 +612,7 @@ def render_report(
         f"- Batch size: `{batch_size}`",
         f"- Batch count: `{batch_count}`",
         "- Status: `planned`; no files were downloaded by this step.",
+        "- Known terminal AWS 404 station-years are excluded unless `--include-known-missing-aws` is supplied.",
         "",
         "## Priority Rule",
         "",
@@ -632,6 +688,11 @@ def main() -> int:
     parser.add_argument("--inventory-run-id", default=None)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--batch-size", type=int, default=1000)
+    parser.add_argument(
+        "--include-known-missing-aws",
+        action="store_true",
+        help="Include station-years with prior missing_on_aws evidence. Default excludes known terminal AWS 404 objects.",
+    )
     args = parser.parse_args()
 
     if not args.psql.exists():
@@ -643,7 +704,13 @@ def main() -> int:
         args.psql, args.host, args.port, args.dbname, args.user
     )
     missing_rows = missing_inventory_rows(
-        args.psql, args.host, args.port, args.dbname, args.user, inventory_run_id
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        inventory_run_id,
+        args.include_known_missing_aws,
     )
     code_commit = git_commit_label(args.project_root)
     run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -698,6 +765,8 @@ def main() -> int:
         "base_url": args.base_url.rstrip("/") + "/",
         "target_root": str(args.target_root),
         "batch_size": args.batch_size,
+        "include_known_missing_aws": args.include_known_missing_aws,
+        "known_missing_aws_rule": "default excludes station-years with prior missing_on_aws terminal AWS 404 evidence",
         "priority_rule": [
             "zero_local_files_for_year_desc",
             "source_year_desc",

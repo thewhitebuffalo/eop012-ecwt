@@ -558,6 +558,8 @@ alter table weather.noaa_raw_backfill_manifest
             """
 create index if not exists ix_noaa_raw_download_attempt_status
     on weather.noaa_raw_download_attempt (calculation_run_id, download_status);
+create index if not exists ix_noaa_raw_download_attempt_station_year_status
+    on weather.noaa_raw_download_attempt (station_id, source_year, raw_station_id, download_status);
 """,
             render_values_insert(
                 "audit.methodology_version",

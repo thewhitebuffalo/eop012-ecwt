@@ -70,6 +70,8 @@ The downloader applies a DJF active-window guard before opening any HTTP request
 
 NOAA HTTP 404 outcomes are terminal missing-object evidence and are recorded as `missing_on_aws` download attempts plus `missing` manifest rows. Non-404 HTTP outcomes remain `failed_http` so they can be retried separately.
 
+Fresh backfill manifests exclude station-years with prior `missing_on_aws` evidence by default. Use `build_noaa_backfill_manifest.py --include-known-missing-aws` only for an explicit source recheck.
+
 ## Load NOAA DJF Hourly Rows
 
 ```bash
