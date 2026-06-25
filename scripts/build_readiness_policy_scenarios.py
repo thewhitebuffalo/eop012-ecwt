@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build first-operable ECWT readiness policy scenario comparison artifacts."""
+"""Build ECWT readiness policy scenario comparison artifacts."""
 
 from __future__ import annotations
 
@@ -116,6 +116,38 @@ def latest_file(docs_dir: Path, pattern: str) -> Path:
     if not matches:
         raise FileNotFoundError(f"No files matched {docs_dir / pattern}")
     return matches[-1]
+
+
+def latest_strict_candidates_file(docs_dir: Path, plant_scope: str) -> Path:
+    if plant_scope == "first-operable":
+        return latest_file(docs_dir, "plant_ecwt_publication_candidates_first_operable_*.csv")
+    matches = sorted(
+        path
+        for path in docs_dir.glob("plant_ecwt_publication_candidates_*.csv")
+        if "first_operable" not in path.name
+    )
+    if not matches:
+        raise FileNotFoundError("No all-plants strict publication candidate CSV found.")
+    return matches[-1]
+
+
+def latest_denominator_file(docs_dir: Path, plant_scope: str) -> Path:
+    return latest_file(docs_dir, f"fixed_period_denominator_diagnostic_{plant_scope}_*.csv")
+
+
+def validate_inputs(strict_rows: list[dict[str, str]], denominator_rows: list[dict[str, str]], plant_scope: str) -> None:
+    strict_scopes = {row.get("plant_scope", "") for row in strict_rows}
+    if strict_rows and strict_scopes != {plant_scope}:
+        raise ValueError(f"Strict candidate CSV scope mismatch: expected {plant_scope}, found {sorted(strict_scopes)}")
+    strict_ids = {row["plant_id"] for row in strict_rows}
+    denominator_ids = {row["plant_id"] for row in denominator_rows}
+    overlap = strict_ids & denominator_ids
+    if overlap:
+        sample = ", ".join(sorted(overlap)[:10])
+        raise ValueError(
+            "Strict candidates and denominator blockers overlap. "
+            f"Check plant scope inputs before building scenarios. Sample: {sample}"
+        )
 
 
 def int_value(raw: object, default: int = 0) -> int:
@@ -283,6 +315,7 @@ def render_report(
     denominator_csv: Path,
     matrix_csv: Path,
     candidates_csv: Path,
+    plant_scope: str,
     matrix_rows: list[dict[str, object]],
     candidate_rows: list[dict[str, object]],
 ) -> None:
@@ -312,6 +345,7 @@ def render_report(
         "",
         f"- Scenario run ID: `{run_id}`",
         f"- Code commit: `{code_commit}`",
+        f"- Plant scope: `{plant_scope}`",
         f"- Strict fixed-period candidates CSV: `{strict_candidates_csv.name}`",
         f"- Denominator diagnostic CSV: `{denominator_csv.name}`",
         f"- Scenario matrix CSV: `{matrix_csv.name}`",
@@ -331,7 +365,7 @@ def render_report(
             "",
             "## Interpretation",
             "",
-            f"- The current fixed-period gate has {int(fixed['total_scenario_candidates']):,} first-operable publication candidates.",
+            f"- The current fixed-period gate has {int(fixed['total_scenario_candidates']):,} {plant_scope} publication candidates.",
             f"- The raw station metadata active-window scenario would produce {int(raw['total_scenario_candidates']):,} candidates, but it promotes {raw_overfill:,} rows with overfilled active-window denominators, so it remains diagnostic only.",
             f"- The normalized active-window loaded-year scenario would produce {int(normalized['total_scenario_candidates']):,} candidates and has {normalized_overfill:,} promoted overfill rows in this diagnostic.",
             "- Scenario candidates are not final compliance outputs; they are auditable policy alternatives for deciding the next publication gate.",
@@ -354,22 +388,25 @@ def main() -> None:
     parser.add_argument("--project-root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--strict-candidates-csv", type=Path)
     parser.add_argument("--denominator-csv", type=Path)
+    parser.add_argument("--plant-scope", choices=["first-operable", "all-plants"], default="first-operable")
     args = parser.parse_args()
 
     docs_dir = args.project_root / "docs"
-    strict_candidates_csv = args.strict_candidates_csv or latest_file(
-        docs_dir,
-        "plant_ecwt_publication_candidates_first_operable_*.csv",
-    )
-    denominator_csv = args.denominator_csv or latest_file(
-        docs_dir,
-        "fixed_period_denominator_diagnostic_first-operable_*.csv",
-    )
+    strict_candidates_csv = args.strict_candidates_csv or latest_strict_candidates_file(docs_dir, args.plant_scope)
+    denominator_csv = args.denominator_csv or latest_denominator_file(docs_dir, args.plant_scope)
+    expected_denominator_fragment = f"fixed_period_denominator_diagnostic_{args.plant_scope}_"
+    if expected_denominator_fragment not in denominator_csv.name:
+        raise ValueError(
+            f"Denominator diagnostic scope mismatch: expected file containing "
+            f"{expected_denominator_fragment!r}, got {denominator_csv.name!r}."
+        )
     strict_rows = read_csv(strict_candidates_csv)
     denominator_rows = read_csv(denominator_csv)
+    validate_inputs(strict_rows, denominator_rows, args.plant_scope)
     matrix_rows, candidate_rows = build_scenario_outputs(strict_rows, denominator_rows)
 
-    run_id = f"readiness_policy_scenarios_first_operable_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    scope_slug = args.plant_scope.replace("-", "_")
+    run_id = f"readiness_policy_scenarios_{scope_slug}_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     code_commit = git_commit_label(args.project_root)
     matrix_csv = docs_dir / f"{run_id}_matrix.csv"
     candidates_csv = docs_dir / f"{run_id}_candidates.csv"
@@ -429,6 +466,7 @@ def main() -> None:
         denominator_csv,
         matrix_csv,
         candidates_csv,
+        args.plant_scope,
         matrix_rows,
         candidate_rows,
     )
@@ -437,6 +475,7 @@ def main() -> None:
             OrderedDict(
                 [
                     ("run_id", run_id),
+                    ("plant_scope", args.plant_scope),
                     ("strict_candidates_csv", str(strict_candidates_csv)),
                     ("denominator_csv", str(denominator_csv)),
                     ("matrix_csv", str(matrix_csv)),
