@@ -1045,6 +1045,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=5436)
     parser.add_argument("--dbname", default="eop012")
     parser.add_argument("--user", default=None)
+    parser.add_argument("--run-id", default=None)
     parser.add_argument("--gap-audit-run-id", default=None)
     parser.add_argument("--max-gap-hours", type=int, default=168)
     parser.add_argument("--reject-source-code", action="append", default=["7"])
@@ -1101,8 +1102,9 @@ def main() -> int:
         max(years),
     )
 
+    code_commit = git_commit_label(args.project_root)
     run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"near_threshold_raw_canonical_gap_audit_{run_timestamp}"
+    run_id = args.run_id or f"near_threshold_raw_canonical_gap_audit_{run_timestamp}"
     staging_dir = args.staging_root / run_id
     staging_dir.mkdir(parents=True, exist_ok=True)
     args.docs_dir.mkdir(parents=True, exist_ok=True)
@@ -1139,7 +1141,6 @@ def main() -> int:
         "station_year_rows": len(station_year_rows),
         "station_count": len(station_rows),
     }
-    code_commit = git_commit_label(args.project_root)
     started_at = utc_now().isoformat(timespec="seconds")
     load_sql = build_load_sql(run_id, code_commit, started_at, params, station_year_staging, station_summary_staging)
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user), input_text=load_sql)

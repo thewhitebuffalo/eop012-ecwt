@@ -258,6 +258,74 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `reason_code` | text | Machine-readable reason for the segment. |
 | `notes` | text | Segment caveat or selection detail. |
 
+## `calc.coverage_blocker_raw_canonical_gap_summary`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `raw_canonical_audit_run_id` | text | Raw-vs-canonical audit run lineage. |
+| `gap_audit_run_id` | text | Near-threshold station-year gap audit used as input. |
+| `priority_run_id` | text | Normalized active-window blocker priority run used as input. |
+| `coverage_run_id` | text | Station-year coverage run used as input. |
+| `inventory_run_id` | text | Raw-file inventory run used as input. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `station_name` | text | Station name from the gap audit. |
+| `station_state` | text | Station state or region from the gap audit. |
+| `station_country` | text | Station country from the gap audit. |
+| `source_year` | integer | NOAA Global Hourly source year. |
+| `impacted_plant_count` | bigint | Count of near-threshold plant blockers tied to the station-year's station. |
+| `raw_file_path` | text | Local raw NOAA CSV inspected by the audit. |
+| `raw_file_size_bytes` | bigint | Size of the inspected local raw file. |
+| `coverage_status` | text | Prior station-year coverage status. |
+| `loaded_file_count` | bigint | Loaded raw files contributing to the prior station-year coverage row. |
+| `gap_table_expected_hours` | bigint | Normalized active-window expected DJF hours from the prior gap table. |
+| `gap_table_valid_hours` | bigint | Full station-year valid DJF hours from the prior coverage table. |
+| `gap_table_missing_hours` | bigint | Prior count-based missing hours for the station-year. |
+| `expected_window_hour_count` | bigint | Exact selected normalized expected-window canonical UTC hours audited. |
+| `canonical_present_expected_window_hours` | bigint | Expected-window hours present in `weather.hourly_djf`. |
+| `canonical_missing_expected_window_hours` | bigint | Expected-window hours absent from `weather.hourly_djf`. |
+| `window_missing_minus_gap_table_missing_hours` | bigint | Difference between exact expected-window missing hours and the prior count-based gap. |
+| `expected_window_candidate_count` | integer | Number of priority rows with the selected expected-window hour count. |
+| `expected_window_ambiguous` | boolean | Whether multiple priority rows tied for the selected expected-window count. |
+| `expected_window_mismatch_hours` | bigint | Difference between selected expected-window hours and the prior expected count. |
+| `raw_djf_row_count` | bigint | Raw NOAA rows in December, January, or February. |
+| `raw_hour_observed_count` | bigint | Distinct canonical DJF hours with at least one raw row. |
+| `raw_accepted_hour_count` | bigint | Distinct canonical DJF hours with at least one row that passes current loader rules. |
+| `source_hour_absent_count` | bigint | Missing expected-window hours with no raw row in the local NOAA file. |
+| `loader_rejected_source_hour_count` | bigint | Missing expected-window hours where all raw rows were rejected by NOAA source-code policy. |
+| `loader_invalid_tmp_hour_count` | bigint | Missing expected-window hours with raw rows but invalid, sentinel, malformed, or quality-code-9 `TMP`. |
+| `loader_rejected_plausibility_hour_count` | bigint | Missing expected-window hours with parsed temperatures outside the configured plausibility range. |
+| `accepted_raw_not_in_canonical_hour_count` | bigint | Missing expected-window hours where at least one raw row would pass loader rules but is absent from `weather.hourly_djf`. |
+| `raw_present_unclassified_hour_count` | bigint | Missing expected-window hours with raw rows that do not fit another reason bucket. |
+| `primary_root_cause` | text | Largest missing-hour reason bucket for the station-year. |
+| `raw_parse_error` | text | Raw-file parse error when applicable. |
+| `notes` | text | Audit caveat or rule summary. |
+
+## `calc.coverage_blocker_raw_canonical_station_summary`
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `raw_canonical_audit_run_id` | text | Raw-vs-canonical audit run lineage. |
+| `gap_audit_run_id` | text | Near-threshold station-year gap audit used as input. |
+| `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
+| `station_name` | text | Station name from the gap audit. |
+| `station_state` | text | Station state or region from the gap audit. |
+| `station_country` | text | Station country from the gap audit. |
+| `station_year_count` | bigint | Station-year rows audited for the station. |
+| `impacted_plant_count` | bigint | Count of near-threshold plant blockers tied to the station. |
+| `gap_table_missing_hours` | bigint | Sum of prior count-based missing hours. |
+| `canonical_missing_expected_window_hours` | bigint | Sum of exact expected-window hours absent from `weather.hourly_djf`. |
+| `window_missing_minus_gap_table_missing_hours` | bigint | Difference between exact expected-window missing hours and prior count-based gap hours. |
+| `source_hour_absent_count` | bigint | Station-level sum of raw source-hour absences. |
+| `loader_rejected_source_hour_count` | bigint | Station-level sum of source-code rejection blockers. |
+| `loader_invalid_tmp_hour_count` | bigint | Station-level sum of invalid or missing NOAA `TMP` blockers. |
+| `loader_rejected_plausibility_hour_count` | bigint | Station-level sum of plausibility rejection blockers. |
+| `accepted_raw_not_in_canonical_hour_count` | bigint | Station-level sum of accepted raw rows absent from canonical hourly data. |
+| `raw_present_unclassified_hour_count` | bigint | Station-level sum of raw-present missing hours that do not fit another reason bucket. |
+| `accepted_raw_not_in_canonical_year_count` | bigint | Station-years with at least one accepted raw row absent from canonical hourly data. |
+| `expected_window_mismatch_year_count` | bigint | Station-years where selected exact expected-window count does not match the prior gap table count. |
+| `top_missing_years` | text | Compact year:hour list for the highest-missing station-years. |
+| `primary_root_cause` | text | Largest missing-hour reason bucket for the station. |
+
 ## `calc.plant_ecwt`
 
 | Column | Type | Meaning |

@@ -192,6 +192,25 @@ not a bulk-download queue. The next remediation question is whether the missing
 valid hours are true source-observation gaps, parser/QA rejections, or a
 methodology threshold decision.
 
+That remediation question is now answered for the near-threshold subset in
+`near_threshold_raw_canonical_gap_audit_20260625T062134Z_report.md`, with
+station-year detail in `near_threshold_raw_canonical_gap_audit_20260625T062134Z_station_years.csv`
+and station summaries in `near_threshold_raw_canonical_gap_audit_20260625T062134Z_stations.csv`.
+The same data is loaded in Postgres under
+`calc.coverage_blocker_raw_canonical_gap_summary` and
+`calc.coverage_blocker_raw_canonical_station_summary`. The audit re-read the
+279 local raw station-year files and compared selected normalized expected-window
+hours with `weather.hourly_djf` using the current loader rules
+(`SOURCE=7` rejected, `TMP` quality `9` or sentinel values invalid, plausible
+temperature range `-65 C` to `40 C`). It found 50,563 missing expected-window
+hours, only 34 above the prior count-based gap table. Of those hours, 34,254 are
+true raw source-hour absences and 16,309 have raw rows but invalid/missing NOAA
+`TMP`. There are 0 hours where a raw row would pass the current loader rules but
+is absent from `weather.hourly_djf`, 0 source-code rejection blockers, and 0
+plausibility rejection blockers. For this near-threshold set, the issue is NOAA
+source sparsity/invalid temperature observations, not corrupted downloads,
+missing AWS bulk objects, or canonical-loader loss.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.
