@@ -105,7 +105,7 @@ def psql_scalar(
 def write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow({field: pg_csv_value(row.get(field)) for field in fieldnames})
@@ -179,12 +179,39 @@ alter table weather.noaa_hourly_load_file
     run(psql_cmd(psql, host, port, dbname, user), input_text=sql)
 
 
-def candidate_files_query(source: str, limit_files: int | None, include_loaded: bool) -> str:
-    source_filter = ""
+def station_year_values(target_station_years: list[tuple[str, int]]) -> str:
+    return ",\n        ".join(
+        f"({sql_literal(station_id)}, {int(source_year)})" for station_id, source_year in target_station_years
+    )
+
+
+def candidate_files_query(
+    source: str,
+    limit_files: int | None,
+    include_loaded: bool,
+    target_station_years: list[tuple[str, int]] | None = None,
+) -> str:
+    source_predicates = ["true"]
     if source == "downloaded":
-        source_filter = "where source_basis = 'download_attempt'"
+        source_predicates.append("ranked.source_basis = 'download_attempt'")
     elif source == "inventory":
-        source_filter = "where source_basis = 'inventory'"
+        source_predicates.append("ranked.source_basis = 'inventory'")
+
+    target_cte = ""
+    target_join = ""
+    if target_station_years:
+        target_cte = f"""
+,
+target_station_years(station_id, source_year) as (
+    values
+        {station_year_values(target_station_years)}
+)
+"""
+        target_join = """
+join target_station_years target
+  on target.station_id = ranked.station_id
+ and target.source_year = ranked.source_year
+"""
 
     loaded_filter = ""
     if not include_loaded:
@@ -241,11 +268,13 @@ ranked as (
         source_priority
     from source_files
     order by station_id, source_year, local_path, source_priority
-),
+)
+{target_cte},
 filtered as (
-    select *
+    select ranked.*
     from ranked
-    {source_filter}
+    {target_join}
+    where {' and '.join(source_predicates)}
 )
 select
     station_id,
@@ -261,6 +290,36 @@ where true
 order by source_year desc, source_priority, station_id, local_path
 {limit_clause}
 """
+
+
+def read_target_station_years(path: Path | None, gap_cause: str | None) -> list[tuple[str, int]]:
+    if path is None:
+        return []
+    if not path.exists():
+        raise FileNotFoundError(path)
+    targets: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        required = {"station_id", "source_year"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"{path} is missing required columns: {', '.join(sorted(missing))}")
+        if gap_cause and "gap_cause" not in set(reader.fieldnames or []):
+            raise ValueError(f"{path} is missing gap_cause column required by --station-year-gap-cause")
+        for row in reader:
+            if gap_cause and row.get("gap_cause") != gap_cause:
+                continue
+            station_id = (row.get("station_id") or "").strip()
+            source_year_text = (row.get("source_year") or "").strip()
+            if not station_id or not source_year_text:
+                continue
+            key = (station_id, int(source_year_text))
+            if key in seen:
+                continue
+            seen.add(key)
+            targets.append(key)
+    return targets
 
 
 def open_text(path: Path):
@@ -866,6 +925,15 @@ def main() -> int:
     parser.add_argument("--limit-files", type=int, default=25)
     parser.add_argument("--include-loaded", action="store_true")
     parser.add_argument(
+        "--station-year-csv",
+        type=Path,
+        help="Optional CSV with station_id and source_year columns used to restrict candidate files.",
+    )
+    parser.add_argument(
+        "--station-year-gap-cause",
+        help="Optional gap_cause value used to filter --station-year-csv rows before loading.",
+    )
+    parser.add_argument(
         "--reject-source-code",
         action="append",
         default=["7"],
@@ -887,6 +955,7 @@ def main() -> int:
 
     ensure_load_schema(args.psql, args.host, args.port, args.dbname, args.user)
     reject_source_codes = parse_code_set(args.reject_source_code)
+    target_station_years = read_target_station_years(args.station_year_csv, args.station_year_gap_cause)
 
     code_commit = git_commit_label(args.project_root)
     run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -899,7 +968,7 @@ def main() -> int:
         args.host,
         args.port,
         args.dbname,
-        candidate_files_query(args.source, args.limit_files, args.include_loaded),
+        candidate_files_query(args.source, args.limit_files, args.include_loaded, target_station_years),
         args.user,
     )
 
@@ -952,6 +1021,9 @@ def main() -> int:
         "source": args.source,
         "limit_files": args.limit_files,
         "include_loaded": args.include_loaded,
+        "station_year_csv": str(args.station_year_csv) if args.station_year_csv else None,
+        "station_year_gap_cause": args.station_year_gap_cause,
+        "target_station_year_count": len(target_station_years),
         "reject_source_codes": sorted(reject_source_codes),
         "min_temp_c": args.min_temp_c,
         "max_temp_c": args.max_temp_c,
