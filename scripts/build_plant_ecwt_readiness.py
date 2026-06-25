@@ -107,6 +107,10 @@ def build_sql(
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
     if coverage_denominator_mode == "plant-ecwt-row":
+        blocked_reason_code = "no_fixed_period_eligible_candidate_station"
+    else:
+        blocked_reason_code = "no_candidate_station_with_provisional_ecwt"
+    if coverage_denominator_mode == "plant-ecwt-row":
         coverage_denominator = "plant ECWT row valid/expected DJF hours"
         readiness_note = (
             "Readiness classification for provisional plant ECWT using valid/expected hours stored on the plant ECWT row. "
@@ -332,7 +336,7 @@ select
         else 'provisional_low_coverage'
     end as readiness_status,
     case
-        when rs.result_status = 'blocked' then 'no_candidate_station_with_provisional_ecwt'
+        when rs.result_status = 'blocked' then {sql_literal(blocked_reason_code)}
         when rs.expected_hour_count = 0 then 'expected_hours_unavailable'
         when rs.valid_hour_count < {min_valid_hours} then 'valid_hours_below_threshold'
         when (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) < {min_coverage_ratio} then 'coverage_ratio_below_threshold'
