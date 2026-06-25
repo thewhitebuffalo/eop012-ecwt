@@ -112,6 +112,22 @@ between the current full fixed-period gate, which yields 144 first-operable
 publication candidates, and the raw metadata active-window gate, which is too
 permissive because some station metadata windows understate loaded observations.
 
+The first-operable readiness policy scenarios are summarized in
+`readiness_policy_scenarios_first_operable_20260625T053723Z_report.md`, with
+the matrix in `readiness_policy_scenarios_first_operable_20260625T053723Z_matrix.csv`
+and scenario candidate rows in
+`readiness_policy_scenarios_first_operable_20260625T053723Z_candidates.csv`.
+The scenario matrix keeps the current Postgres readiness gate unchanged while
+quantifying policy alternatives:
+
+- current fixed-period gate: 144 candidates, 13,226 blocked
+- raw station-metadata active-window gate: 11,112 candidates, but 2,794 promoted
+  rows have overfilled denominators, so this remains diagnostic-only
+- normalized active-window loaded-year gate: 6,136 candidates, 7,234 blocked,
+  and 0 promoted overfill rows
+- normalized active-window plus current absolute 20 loaded station-year rule:
+  577 candidates and 12,793 blocked
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.
