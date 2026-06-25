@@ -1,6 +1,6 @@
 # ECWT Pipeline Status
 
-Generated UTC: 2026-06-25T06:01:22Z
+Generated UTC: 2026-06-25T06:09:08Z
 
 ## Current Checkpoint
 
@@ -16,6 +16,7 @@ Generated UTC: 2026-06-25T06:01:22Z
 | Station-selection review seed | `station_selection_review_seed_20260625T055346Z` | 162 review rows; 0 release-ready rows |
 | Station-selection policy scenarios | `station_selection_policy_scenarios_20260625T055356Z` | 8 scenarios; 162 current fixed-period candidates |
 | Normalized coverage blocker priority | `normalized_active_window_blocker_priority_20260625T060119Z` | 7,234 plant blockers; 639 station summaries; 50 state summaries |
+| Near-threshold station-year gap audit | `near_threshold_station_year_gap_audit_20260625T060905Z` | 1,004 plants; 49 stations; 279 station-year gaps |
 
 ## Plant Readiness
 
@@ -174,6 +175,22 @@ normalized active-window threshold, 848 more within 168 hours, 1,351 within 720
 hours, 3,047 within 2,160 hours, and 1,832 above 2,160 hours. This is a triage
 queue for coverage/methodology remediation; it does not change readiness or
 release status.
+
+The near-threshold subset is now audited at station-year grain in
+`near_threshold_station_year_gap_audit_20260625T060905Z_report.md`, with
+station-year rows in `near_threshold_station_year_gap_audit_20260625T060905Z_station_years.csv`
+and station summaries in `near_threshold_station_year_gap_audit_20260625T060905Z_stations.csv`.
+The same data is queryable in Postgres under
+`calc.coverage_blocker_station_year_gap` and
+`calc.coverage_blocker_station_gap_summary`. Scope is the 1,004 plant blockers
+within 168 valid DJF hours of the normalized active-window threshold. The audit
+found 279 station-year gaps across 49 stations. All 279 station-year gaps have
+available local raw NOAA files, 0 raw-missing years, and 0 latest AWS 404 years;
+247 have an explicit `downloaded` attempt and 32 are present from an existing
+local raw root without a corresponding downloader attempt row. This is therefore
+not a bulk-download queue. The next remediation question is whether the missing
+valid hours are true source-observation gaps, parser/QA rejections, or a
+methodology threshold decision.
 
 ## Guardrail Added
 
