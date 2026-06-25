@@ -257,6 +257,99 @@ def missing_inventory_rows(
     )
 
 
+def manifest_scope_metrics(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    inventory_run_id: str,
+    include_known_missing_aws: bool,
+) -> OrderedDict[str, str]:
+    known_missing_join = ""
+    known_missing_select = "0"
+    known_missing_filter = "true"
+    if relation_exists(psql, host, port, dbname, user, "weather.noaa_raw_download_attempt"):
+        ensure_download_attempt_lookup_index(psql, host, port, dbname, user)
+        known_missing_join = """
+        left join (
+            select distinct station_id, source_year, raw_station_id
+            from weather.noaa_raw_download_attempt
+            where download_status = 'missing_on_aws'
+        ) attempt
+          on attempt.station_id = scoped.station_id
+         and attempt.source_year = scoped.source_year
+         and attempt.raw_station_id = scoped.raw_station_id
+        """
+        known_missing_select = "count(*) filter (where attempt.station_id is not null)"
+        if not include_known_missing_aws:
+            known_missing_filter = "attempt.station_id is null"
+
+    rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        f"""
+        with scoped as (
+            select
+                i.station_id,
+                i.source_year,
+                i.raw_station_id,
+                st.first_observation_utc,
+                st.last_observation_utc,
+                (
+                    st.first_observation_utc is null
+                    or st.last_observation_utc is null
+                    or (
+                        st.first_observation_utc < make_timestamptz(i.source_year, 3, 1, 0, 0, 0, 'UTC')
+                        and st.last_observation_utc >= make_timestamptz(i.source_year, 1, 1, 0, 0, 0, 'UTC')
+                    )
+                    or (
+                        st.first_observation_utc < make_timestamptz(i.source_year + 1, 1, 1, 0, 0, 0, 'UTC')
+                        and st.last_observation_utc >= make_timestamptz(i.source_year, 12, 1, 0, 0, 0, 'UTC')
+                    )
+                ) as has_djf_active_overlap,
+                (
+                    st.first_observation_utc is null
+                    or st.last_observation_utc is null
+                ) as active_window_unknown
+            from weather.noaa_raw_file_inventory i
+            join weather.station st
+              on st.station_id = i.station_id
+            where i.calculation_run_id = {sql_literal(inventory_run_id)}
+              and i.file_status = 'missing'
+        )
+        select
+            count(*)::text as missing_inventory_rows,
+            count(*) filter (where active_window_unknown)::text as active_window_unknown_rows,
+            count(*) filter (where has_djf_active_overlap)::text as active_window_eligible_rows,
+            count(*) filter (where not has_djf_active_overlap)::text as active_window_excluded_rows,
+            {known_missing_select}::text as known_missing_aws_rows,
+            count(*) filter (
+                where has_djf_active_overlap
+                  and {known_missing_filter}
+            )::text as planned_after_filters_rows
+        from scoped
+        {known_missing_join}
+        """,
+        user,
+    )
+    if not rows:
+        return OrderedDict()
+    row = rows[0]
+    return OrderedDict(
+        [
+            ("missing inventory rows", row["missing_inventory_rows"]),
+            ("active-window unknown rows", row["active_window_unknown_rows"]),
+            ("DJF active-window eligible rows", row["active_window_eligible_rows"]),
+            ("DJF active-window excluded rows", row["active_window_excluded_rows"]),
+            ("known terminal AWS 404 rows", row["known_missing_aws_rows"]),
+            ("planned rows after filters", row["planned_after_filters_rows"]),
+        ]
+    )
+
+
 def priority_tuple(row: dict[str, str]) -> tuple[int, int, int, str]:
     year = int(row["source_year"])
     available = int(row["source_year_available_count"])
@@ -574,6 +667,7 @@ def render_report(
     target_root: Path,
     batch_size: int,
     manifest_rows: list[dict[str, object]],
+    scope_metrics: OrderedDict[str, str],
     db_counts: OrderedDict[str, str],
     host: str,
     port: int,
@@ -612,22 +706,34 @@ def render_report(
         f"- Batch size: `{batch_size}`",
         f"- Batch count: `{batch_count}`",
         "- Status: `planned`; no files were downloaded by this step.",
+        "- Station-years outside the station's observed DJF active window are excluded before download planning.",
         "- Known terminal AWS 404 station-years are excluded unless `--include-known-missing-aws` is supplied.",
         "",
-        "## Priority Rule",
+        "## Manifest Filters",
         "",
-        "Rows are sorted by:",
-        "",
-        "1. years with zero local candidate-station raw files first",
-        "2. newer source years first",
-        "3. stations linked to more candidate plants first",
-        "4. station ID as a stable tie-breaker",
-        "",
-        "## Planned Rows By Year",
-        "",
-        "| Year | Planned Downloads |",
+        "| Filter Metric | Rows |",
         "| --- | ---: |",
     ]
+    for label, count in scope_metrics.items():
+        lines.append(f"| `{label}` | {count} |")
+    lines.extend(
+        [
+            "",
+            "## Priority Rule",
+            "",
+            "Rows are sorted by:",
+            "",
+            "1. years with zero local candidate-station raw files first",
+            "2. newer source years first",
+            "3. stations linked to more candidate plants first",
+            "4. station ID as a stable tie-breaker",
+            "",
+            "## Planned Rows By Year",
+            "",
+            "| Year | Planned Downloads |",
+            "| --- | ---: |",
+        ]
+    )
     for year, count in sorted(by_year.items()):
         lines.append(f"| {year} | {count} |")
     lines.extend(
@@ -771,6 +877,7 @@ def main() -> int:
         "target_root": str(args.target_root),
         "batch_size": args.batch_size,
         "include_known_missing_aws": args.include_known_missing_aws,
+        "active_window_rule": "station-years must overlap January-February or December of the source year unless station active-window metadata is unknown",
         "known_missing_aws_rule": "default excludes station-years with prior missing_on_aws terminal AWS 404 evidence",
         "priority_rule": [
             "zero_local_files_for_year_desc",
@@ -785,6 +892,15 @@ def main() -> int:
     sql_path.write_text(load_sql, encoding="utf-8")
     run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user) + ["-f", str(sql_path)])
 
+    scope_metrics = manifest_scope_metrics(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        inventory_run_id,
+        args.include_known_missing_aws,
+    )
     db_counts = report_counts(args.psql, args.host, args.port, args.dbname, args.user, run_id)
     report_path = args.project_root / "docs" / "noaa_backfill_manifest_report.md"
     render_report(
@@ -796,6 +912,7 @@ def main() -> int:
         args.target_root,
         args.batch_size,
         manifest_rows,
+        scope_metrics,
         db_counts,
         args.host,
         args.port,
@@ -814,6 +931,7 @@ def main() -> int:
                 "batch_size": args.batch_size,
                 "batch_count": math.ceil(len(manifest_rows) / args.batch_size) if manifest_rows else 0,
                 "first_batch_rows": min(len(manifest_rows), args.batch_size),
+                "scope_metrics": scope_metrics,
                 "db_counts": db_counts,
             },
             indent=2,

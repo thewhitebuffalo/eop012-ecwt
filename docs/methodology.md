@@ -145,6 +145,21 @@ The project should publish both the ECWT result and the coverage evidence used t
 
 Publication-readiness coverage ratios should use a fixed selected-station active-period DJF denominator for the ECWT calculation window. They should not use only station-years that happen to have been loaded already, because that denominator grows during backfill and can make readiness counts move for bookkeeping reasons rather than real coverage gains.
 
+## Secondary Station Fill For Missing Primary Hours
+
+EOP-012-3 requires the calculation record to identify the ECWT calculation date, the source or sources of temperature data, and any adjustments used for missing or invalid hourly temperature data. The EPRI ECWT guidance also allows missing data from the most representative station to be supplemented from the next most representative station, provided the owner documents the station choice and missing-data treatment.
+
+This project therefore allows a secondary weather station fill only under a documented policy:
+
+1. The primary selected station remains the representative station.
+2. Valid primary-station hourly dry-bulb observations are never overwritten.
+3. A fallback station may contribute only timestamps where the primary station is missing a valid dry-bulb value.
+4. The fallback station must come from the documented candidate-station set and should be the nearest candidate that makes the composite series satisfy the publication coverage threshold, unless a manual review documents a better representative choice.
+5. The ECWT must be recalculated on the composite hourly series, not copied from either station's standalone ECWT.
+6. The output must record primary station ID, fallback station ID, primary valid hours, fallback-filled hours, composite valid hours, expected hours, coverage before and after fill, ECWT before and after fill, and the reason for the fill.
+
+This is an adjustment for missing or invalid data, not station shopping. A farther or colder station cannot be substituted merely to change the ECWT. If no documented fallback station resolves the missing-hour problem, the plant remains blocked or requires manual review.
+
 ## ECWT Calculation
 
 For each selected plant or station series:
