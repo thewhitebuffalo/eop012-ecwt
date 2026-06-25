@@ -71,10 +71,73 @@ def psql_scalar(psql: Path, host: str, port: int, dbname: str, user: str | None,
     return result.stdout.strip()
 
 
+def relation_exists(psql: Path, host: str, port: int, dbname: str, user: str | None, relation_name: str) -> bool:
+    exists = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"select to_regclass({sql_literal(relation_name)}) is not null;",
+    )
+    return exists.lower() == "t"
+
+
+def coverage_row_count(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    coverage_run_id: str,
+    coverage_table: str,
+) -> int:
+    return int(
+        psql_scalar(
+            psql,
+            host,
+            port,
+            dbname,
+            user,
+            f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(coverage_run_id)};",
+        )
+        or "0"
+    )
+
+
+def resolve_coverage_table(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    coverage_run_id: str,
+    coverage_source: str,
+    preferred_table: str | None,
+) -> str:
+    valid_tables = {
+        "weather.station_year_djf_coverage",
+        "weather.station_year_djf_coverage_current",
+    }
+    if coverage_source == "history":
+        return "weather.station_year_djf_coverage"
+    if coverage_source == "current":
+        return "weather.station_year_djf_coverage_current"
+    if preferred_table in valid_tables and relation_exists(psql, host, port, dbname, user, preferred_table):
+        if coverage_row_count(psql, host, port, dbname, user, coverage_run_id, preferred_table) > 0:
+            return preferred_table
+    current_table = "weather.station_year_djf_coverage_current"
+    if relation_exists(psql, host, port, dbname, user, current_table) and coverage_row_count(
+        psql, host, port, dbname, user, coverage_run_id, current_table
+    ) > 0:
+        return current_table
+    return "weather.station_year_djf_coverage"
+
+
 def write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow({field: row.get(field, "") for field in fieldnames})
@@ -128,11 +191,14 @@ def blocker_query(
     candidate_run_id: str,
     station_ecwt_run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     fixed_min_year: int,
     fixed_max_year: int,
     fixed_min_coverage_ratio: float,
     fixed_min_loaded_years: int,
 ) -> str:
+    if coverage_table not in {"weather.station_year_djf_coverage", "weather.station_year_djf_coverage_current"}:
+        raise ValueError(f"Unexpected coverage table: {coverage_table}")
     return f"""
 with fixed_years as (
     select generate_series({fixed_min_year}, {fixed_max_year})::integer as source_year
@@ -167,7 +233,7 @@ station_fixed_coverage as (
             as fixed_coverage_ratio
     from calc.station_ecwt se
     cross join fixed_expected_by_year e
-    left join weather.station_year_djf_coverage c
+    left join {coverage_table} c
       on c.calculation_run_id = {sql_literal(coverage_run_id)}
      and c.station_id = se.station_id
      and c.source_year = e.source_year
@@ -370,6 +436,7 @@ def render_report(
     candidate_run_id: str,
     station_ecwt_run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     fixed_min_year: int,
     fixed_max_year: int,
     fixed_min_coverage_ratio: float,
@@ -413,6 +480,7 @@ def render_report(
         f"- Candidate run ID: `{candidate_run_id}`",
         f"- Station ECWT run ID: `{station_ecwt_run_id}`",
         f"- Station-year coverage run ID: `{coverage_run_id}`",
+        f"- Station-year coverage table: `{coverage_table}`",
         f"- Fixed period: `{fixed_min_year}-{fixed_max_year}`",
         f"- Fixed minimum coverage ratio: `{fixed_min_coverage_ratio}`",
         f"- Fixed minimum loaded station-years: `{fixed_min_loaded_years}`",
@@ -485,8 +553,7 @@ def render_report(
             "- `no_candidate_with_provisional_station_ecwt` means none of the plant's candidate stations has a provisional station ECWT in the selected station ECWT run.",
             "- `fixed_coverage_below_threshold` means at least one candidate has provisional station ECWT, but no candidate reaches the fixed-period coverage threshold.",
             "- `fixed_loaded_years_below_threshold` means the candidate coverage ratio can be high but the station does not satisfy the loaded-year span rule.",
-            "- The next data step is to prioritize NOAA backfill and station-candidate expansion around these blocker classes instead of spending effort on rows already release-ready.",
-            "",
+            "- When the expanded NOAA AWS manifest is exhausted, do not treat all blockers as ordinary retry work; separate terminal 404 gaps, station-candidate expansion, plant geocoding gaps, and denominator-policy review.",
         ]
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -502,6 +569,7 @@ def main() -> None:
     parser.add_argument("--dbname", default="eop012")
     parser.add_argument("--user")
     parser.add_argument("--plant-ecwt-run-id")
+    parser.add_argument("--coverage-source", choices=["auto", "current", "history"], default="auto")
     args = parser.parse_args()
 
     plant_ecwt_run_id = args.plant_ecwt_run_id or latest_fixed_plant_ecwt_run_id(
@@ -513,6 +581,17 @@ def main() -> None:
     candidate_run_id = str(params["candidate_run_id"])
     station_ecwt_run_id = str(params["station_ecwt_run_id"])
     coverage_run_id = str(params["coverage_run_id"])
+    preferred_coverage_table = str(params.get("coverage_table") or "") if params else None
+    coverage_table = resolve_coverage_table(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        coverage_run_id,
+        args.coverage_source,
+        preferred_coverage_table,
+    )
     fixed_min_year = int(params["fixed_min_year"])
     fixed_max_year = int(params["fixed_max_year"])
     fixed_min_coverage_ratio = float(params["fixed_min_coverage_ratio"])
@@ -531,6 +610,7 @@ def main() -> None:
             candidate_run_id,
             station_ecwt_run_id,
             coverage_run_id,
+            coverage_table,
             fixed_min_year,
             fixed_max_year,
             fixed_min_coverage_ratio,
@@ -550,6 +630,7 @@ def main() -> None:
         candidate_run_id,
         station_ecwt_run_id,
         coverage_run_id,
+        coverage_table,
         fixed_min_year,
         fixed_max_year,
         fixed_min_coverage_ratio,
