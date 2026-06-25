@@ -1,0 +1,6 @@
+exception_review_run_id,selected_station_id,selected_station_name,selected_station_state,selected_station_country,blocked_plant_count,plant_states,min_coverage_ratio,median_coverage_ratio,max_coverage_ratio,total_valid_hour_gap_to_threshold,max_valid_hour_gap_to_threshold,latest_retryable_failure_station_year_count,notes
+plant_ecwt_exception_review_20260625T140741Z,702460-99999,MINCHUMINA,AK,US,7,AK:7,0.938422,0.938422,0.938422,882,126,0,Selected station for one or more remaining coverage-threshold blockers.
+plant_ecwt_exception_review_20260625T140741Z,723528-99999,FREDERICK MUNI,OK,US,3,TX:3,0.945034,0.945034,0.945034,195,65,0,Selected station for one or more remaining coverage-threshold blockers.
+plant_ecwt_exception_review_20260625T140741Z,999999-26655,RED DOG MINE 3 SSW,AK,US,3,AK:3,0.934586,0.934586,0.934586,1605,535,0,Selected station for one or more remaining coverage-threshold blockers.
+plant_ecwt_exception_review_20260625T140741Z,703430-99999,MIDDLETON ISLAND,AK,US,1,AK:1,0.945151,0.945151,0.945151,53,53,0,Selected station for one or more remaining coverage-threshold blockers.
+plant_ecwt_exception_review_20260625T140741Z,722539-99999,SAN MARCOS MUNI,TX,US,1,TX:1,0.947263,0.947263,0.947263,36,36,0,Selected station for one or more remaining coverage-threshold blockers.
