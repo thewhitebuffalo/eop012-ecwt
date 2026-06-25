@@ -661,17 +661,22 @@ def render_report(
     )
     for label, count in db_counts.items():
         lines.append(f"| `{label}` | {count} |")
-    lines.extend(
-        [
-            "",
-            "## Interpretation",
-            "",
-            "- This is a download plan, not a download run.",
-            "- Batch 1 is intentionally limited to the first 1,000 planned files so the downloader can be tested without launching the entire backfill.",
-            "- The next step should implement or run a batch downloader that consumes this manifest and records HTTP status, bytes, hashes, and failures.",
-            "",
-        ]
-    )
+    lines.extend(["", "## Interpretation", "", "- This is a download plan, not a download run."])
+    if manifest_rows:
+        lines.extend(
+            [
+                "- Batch 1 is intentionally limited to the first 1,000 planned files so the downloader can be tested without launching the entire backfill.",
+                "- The next step should run a batch downloader that consumes this manifest and records HTTP status, bytes, hashes, and failures.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- This manifest has zero planned rows.",
+                "- Under the configured roots, DJF active-window filter, and known terminal AWS 404 exclusion, there are no remaining AWS download candidates.",
+            ]
+        )
+    lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
