@@ -66,6 +66,8 @@ dbname=eop012
 
 Each batch consumes planned rows from `weather.noaa_raw_backfill_manifest`, writes successful files under `/Volumes/NOAA_CACHE/EOP012/raw/noaa/global-hourly`, records attempts in `weather.noaa_raw_download_attempt`, registers successful files in `audit.source_file`, and writes a report in `docs/`.
 
+The downloader applies a DJF active-window guard before opening any HTTP request: station-years are eligible only when station metadata overlaps January-February or December of the source year, unless the station active window is unknown. Use `prune_noaa_manifest_active_window.py` to mark stale inactive manifest rows as `skipped`.
+
 NOAA HTTP 404 outcomes are terminal missing-object evidence and are recorded as `missing_on_aws` download attempts plus `missing` manifest rows. Non-404 HTTP outcomes remain `failed_http` so they can be retried separately.
 
 ## Load NOAA DJF Hourly Rows

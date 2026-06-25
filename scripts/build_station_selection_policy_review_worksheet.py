@@ -73,10 +73,14 @@ def build_policy_rows(
     scenario: dict[str, object],
     reviewer: str,
     accept_reason: str,
+    preserve_current_accepted: bool,
 ) -> list[dict[str, str]]:
     output: list[dict[str, str]] = []
     for row in rows:
         out = dict(row)
+        if preserve_current_accepted and row.get("current_review_status") == "accepted":
+            output.append(out)
+            continue
         if qualifies(row, scenario):
             out["proposed_review_status"] = "accepted"
             out["proposed_review_basis"] = "policy_override"
@@ -95,13 +99,21 @@ def render_report(
     code_commit: str,
     worksheet_path: Path,
     rows: list[dict[str, str]],
+    preserve_current_accepted: bool,
 ) -> None:
-    accepted = [row for row in rows if row.get("proposed_review_status") == "accepted"]
-    preserved = len(rows) - len(accepted)
+    newly_accepted = [row for row in rows if row.get("proposed_review_status") == "accepted"]
+    current_accepted = [row for row in rows if row.get("current_review_status") == "accepted"]
+    accepted_after_apply = [
+        row
+        for row in rows
+        if row.get("proposed_review_status") == "accepted"
+        or (not row.get("proposed_review_status") and row.get("current_review_status") == "accepted")
+    ]
+    preserved = len(rows) - len(newly_accepted)
     flag_counts: Counter[str] = Counter()
-    state_counts: Counter[str] = Counter(row.get("plant_state") or "(blank)" for row in accepted)
-    country_counts: Counter[str] = Counter(row.get("station_country") or "(blank)" for row in accepted)
-    for row in accepted:
+    state_counts: Counter[str] = Counter(row.get("plant_state") or "(blank)" for row in accepted_after_apply)
+    country_counts: Counter[str] = Counter(row.get("station_country") or "(blank)" for row in accepted_after_apply)
+    for row in accepted_after_apply:
         for flag in (row.get("risk_flags") or "").split(";"):
             if flag:
                 flag_counts[flag] += 1
@@ -119,6 +131,7 @@ def render_report(
         f"- Scenario name: `{scenario['scenario_name']}`",
         f"- Code commit: `{code_commit}`",
         f"- Worksheet CSV: `{worksheet_path.name}`",
+        f"- Preserve current accepted rows: `{preserve_current_accepted}`",
         "",
         "## Policy",
         "",
@@ -129,20 +142,22 @@ def render_report(
         "| Metric | Rows |",
         "| --- | ---: |",
         f"| Source review rows | {len(rows):,} |",
-        f"| Proposed accepted rows | {len(accepted):,} |",
+        f"| Current accepted rows | {len(current_accepted):,} |",
+        f"| Newly proposed accepted rows | {len(newly_accepted):,} |",
+        f"| Accepted rows after applying worksheet | {len(accepted_after_apply):,} |",
         f"| Preserved as current disposition | {preserved:,} |",
         "",
-        "## Accepted Rows By Plant State",
+        "## Accepted Rows After Applying Worksheet By Plant State",
         "",
         "| Plant State | Rows |",
         "| --- | ---: |",
     ]
     for state, count in state_counts.most_common():
         lines.append(f"| `{state}` | {count:,} |")
-    lines.extend(["", "## Accepted Rows By Station Country", "", "| Station Country | Rows |", "| --- | ---: |"])
+    lines.extend(["", "## Accepted Rows After Applying Worksheet By Station Country", "", "| Station Country | Rows |", "| --- | ---: |"])
     for country, count in country_counts.most_common():
         lines.append(f"| `{country}` | {count:,} |")
-    lines.extend(["", "## Accepted Row QA Flags", "", "| QA Flag | Rows |", "| --- | ---: |"])
+    lines.extend(["", "## Accepted Rows After Applying Worksheet QA Flags", "", "| QA Flag | Rows |", "| --- | ---: |"])
     if flag_counts:
         for flag, count in flag_counts.most_common():
             lines.append(f"| `{flag}` | {count:,} |")
@@ -155,6 +170,7 @@ def render_report(
             "",
             "- This file is a complete review worksheet for `scripts/apply_station_selection_review_updates.py`.",
             "- Rows not qualifying under the policy keep blank proposed fields, which preserves their current disposition.",
+            "- When current accepted rows are preserved, this worksheet layers the new policy onto unresolved rows without rewriting prior accepted dispositions.",
             "- Applying this worksheet changes only the station-selection review snapshot and derived release-readiness gate.",
             "",
         ]
@@ -175,6 +191,11 @@ def main() -> None:
     parser.add_argument("--scenario-id", required=True)
     parser.add_argument("--reviewer", default="codex_policy_us_ca_core")
     parser.add_argument("--accept-reason")
+    parser.add_argument(
+        "--preserve-current-accepted",
+        action="store_true",
+        help="Leave rows that are already accepted blank in proposed fields so their existing disposition is preserved.",
+    )
     args = parser.parse_args()
 
     scenario = scenario_by_id(args.scenario_id)
@@ -184,14 +205,23 @@ def main() -> None:
     accept_reason = args.accept_reason or f"policy_accept_{args.scenario_id}"
     code_commit = git_commit_label(args.project_root)
     rows = psql_csv_query(args.psql, args.host, args.port, args.dbname, template_query(source_review_run_id), args.user)
-    output_rows = build_policy_rows(rows, scenario, args.reviewer, accept_reason)
+    output_rows = build_policy_rows(rows, scenario, args.reviewer, accept_reason, args.preserve_current_accepted)
 
     run_id = f"station_selection_policy_review_{args.scenario_id}_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     docs_dir = args.project_root / "docs"
     worksheet_path = docs_dir / f"{run_id}.csv"
     report_path = docs_dir / f"{run_id}_report.md"
     write_csv(worksheet_path, TEMPLATE_FIELDS, output_rows)
-    render_report(report_path, run_id, source_review_run_id, scenario, code_commit, worksheet_path, output_rows)
+    render_report(
+        report_path,
+        run_id,
+        source_review_run_id,
+        scenario,
+        code_commit,
+        worksheet_path,
+        output_rows,
+        args.preserve_current_accepted,
+    )
     print(
         json.dumps(
             OrderedDict(
@@ -201,6 +231,7 @@ def main() -> None:
                     ("scenario_id", args.scenario_id),
                     ("rows", len(output_rows)),
                     ("proposed_accepted_rows", sum(1 for row in output_rows if row.get("proposed_review_status") == "accepted")),
+                    ("preserve_current_accepted", args.preserve_current_accepted),
                     ("worksheet_path", str(worksheet_path)),
                     ("report_path", str(report_path)),
                 ]

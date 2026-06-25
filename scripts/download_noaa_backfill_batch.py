@@ -149,6 +149,27 @@ def latest_manifest_run_id(psql: Path, host: str, port: int, dbname: str, user: 
     return run_id
 
 
+def active_djf_overlap_condition(manifest_alias: str = "m", station_alias: str = "st") -> str:
+    return f"""
+    (
+        {station_alias}.first_observation_utc is null
+        or {station_alias}.last_observation_utc is null
+        or (
+            {station_alias}.first_observation_utc
+                < make_timestamptz({manifest_alias}.source_year, 3, 1, 0, 0, 0, 'UTC')
+            and {station_alias}.last_observation_utc
+                >= make_timestamptz({manifest_alias}.source_year, 1, 1, 0, 0, 0, 'UTC')
+        )
+        or (
+            {station_alias}.first_observation_utc
+                < make_timestamptz({manifest_alias}.source_year + 1, 1, 1, 0, 0, 0, 'UTC')
+            and {station_alias}.last_observation_utc
+                >= make_timestamptz({manifest_alias}.source_year, 12, 1, 0, 0, 0, 'UTC')
+        )
+    )
+    """
+
+
 def manifest_batch_rows(
     psql: Path,
     host: str,
@@ -160,8 +181,9 @@ def manifest_batch_rows(
     limit: int | None,
     include_non_planned: bool,
 ) -> list[dict[str, str]]:
-    status_clause = "" if include_non_planned else "and manifest_status = 'planned'"
+    status_clause = "" if include_non_planned else "and m.manifest_status = 'planned'"
     limit_clause = "" if limit is None else f"limit {int(limit)}"
+    active_window_condition = active_djf_overlap_condition("m", "st")
     return psql_csv_query(
         psql,
         host,
@@ -169,22 +191,25 @@ def manifest_batch_rows(
         dbname,
         f"""
         select
-            manifest_id,
-            calculation_run_id as manifest_run_id,
-            inventory_run_id,
-            station_id,
-            source_year::text as source_year,
-            raw_station_id,
-            download_url,
-            target_path,
-            priority_rank::text as priority_rank,
-            batch_number::text as batch_number,
-            station_candidate_plant_links::text as station_candidate_plant_links
-        from weather.noaa_raw_backfill_manifest
-        where calculation_run_id = {sql_literal(manifest_run_id)}
-          and batch_number = {batch_number}
+            m.manifest_id,
+            m.calculation_run_id as manifest_run_id,
+            m.inventory_run_id,
+            m.station_id,
+            m.source_year::text as source_year,
+            m.raw_station_id,
+            m.download_url,
+            m.target_path,
+            m.priority_rank::text as priority_rank,
+            m.batch_number::text as batch_number,
+            m.station_candidate_plant_links::text as station_candidate_plant_links
+        from weather.noaa_raw_backfill_manifest m
+        join weather.station st
+          on st.station_id = m.station_id
+        where m.calculation_run_id = {sql_literal(manifest_run_id)}
+          and m.batch_number = {batch_number}
           {status_clause}
-        order by priority_rank
+          and {active_window_condition}
+        order by m.priority_rank
         {limit_clause}
         """,
         user,
@@ -832,6 +857,7 @@ def render_report(
             "- Files are written through temporary `.part` files and moved into place only after the stream completes.",
             "- Existing files are not overwritten unless `--overwrite` is explicitly supplied.",
             "- Successful downloads are hashed with SHA-256 and registered in `audit.source_file`.",
+            "- Candidate station-years are selected only when station metadata has Jan-Feb or December active-window overlap for the source year, or when the station active window is unknown.",
             "- `missing_on_aws` means the NOAA public AWS endpoint returned HTTP 404 for that station-year object; this is treated as a terminal missing source object, not a corrupted local file.",
             "- `failed_http` is reserved for non-404 HTTP errors such as 500 or 503 and should remain retryable.",
             "- `failed_exception` indicates a local or network exception and should be investigated before retrying.",
@@ -958,6 +984,7 @@ def main() -> int:
         "overwrite": args.overwrite,
         "dry_run": args.dry_run,
         "include_non_planned": args.include_non_planned,
+        "djf_active_window_guard": "require station metadata Jan-Feb or December overlap before HTTP request",
         "attempt_rows": len(attempts),
         "elapsed_seconds": round(elapsed_seconds, 3),
         "status_counts": dict(status_counts),
