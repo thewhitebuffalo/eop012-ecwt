@@ -1,6 +1,6 @@
 # ECWT Pipeline Status
 
-Generated UTC: 2026-06-25T04:45:35Z
+Generated UTC: 2026-06-25T05:49:12Z
 
 ## Current Checkpoint
 
@@ -12,6 +12,7 @@ Generated UTC: 2026-06-25T04:45:35Z
 | Station ECWT | `station_ecwt_loaded_20260625T042423Z` | 4,250 stations |
 | Fixed-period plant ECWT | `plant_ecwt_provisional_fixed_period_20260625T043543Z` | 16,132 plants |
 | Fixed-period readiness | `plant_ecwt_readiness_fixed_period_20260625T043609Z` | 162 all-plant candidates; 144 first-operable candidates |
+| Readiness policy scenario DB load | `readiness_policy_scenarios_db_load_20260625T054908Z` | 5 scenarios; 20,039 candidate rows |
 
 ## Plant Readiness
 
@@ -127,6 +128,14 @@ quantifying policy alternatives:
   and 0 promoted overfill rows
 - normalized active-window plus current absolute 20 loaded station-year rule:
   577 candidates and 12,793 blocked
+
+Those scenario artifacts are now loaded into Postgres under
+`calc.readiness_policy_scenario` and
+`calc.readiness_policy_scenario_candidate` by calculation run
+`readiness_policy_scenarios_db_load_20260625T054908Z`. The load report is
+`readiness_policy_scenarios_db_load_20260625T054908Z_report.md`; it records 5
+scenario rows, 20,039 scenario-candidate rows, and 2 hashed `audit.source_file`
+registrations.
 
 ## Guardrail Added
 
