@@ -119,6 +119,8 @@ create table if not exists weather.station_year_djf_coverage (
 );
 create index if not exists ix_station_year_djf_coverage_station_year
     on weather.station_year_djf_coverage (station_id, source_year);
+create index if not exists ix_station_year_djf_coverage_run_station_year
+    on weather.station_year_djf_coverage (calculation_run_id, station_id, source_year);
 create index if not exists ix_station_year_djf_coverage_status
     on weather.station_year_djf_coverage (calculation_run_id, coverage_status);
 
