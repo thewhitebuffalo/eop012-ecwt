@@ -1,11 +1,11 @@
 {
   "release_id": "scoped_plant_ecwt_release_20260625T161629Z",
   "release_name": "Scoped plant ECWT release 20260625T161629Z",
-  "manifest_run_id": "release_manifest_20260625T163327Z",
-  "generated_at_utc": "2026-06-25T16:33:27Z",
+  "manifest_run_id": "release_manifest_20260625T163910Z",
+  "generated_at_utc": "2026-06-25T16:39:10Z",
   "project_root": "/Users/Shared/EOP012/rebuild",
   "methodology_version": "eop012-ecwt-method-v0.1.0",
-  "git_generation_commit": "f144dbc1e4958600d49fb6e064acc971d28b5e4a",
+  "git_generation_commit": "ba953a9ff420c8ebfeb242c130104fd92a8cd8ef",
   "scope": "non-Alaska plant-level publication-ready ECWT rows; reviewed no-station edge cases excluded",
   "source_run_ids": {
     "raw_inventory_run_id": "noaa_raw_file_inventory_20260625T153854Z",
@@ -104,7 +104,13 @@
     },
     {
       "role": "denominator diagnostic",
-      "calculation_run_id": "fixed_period_denominator_diagnostic_all-plants_20260625T161153Z"
+      "calculation_run_id": "fixed_period_denominator_diagnostic_all-plants_20260625T161153Z",
+      "methodology_version": "eop012-ecwt-method-v0.1.0",
+      "run_status": "succeeded",
+      "code_commit": "bd3c33c8073c2a66057773e07ae474d2b8eb9be4",
+      "run_started_at_utc": "2026-06-25 09:11:54-07",
+      "run_finished_at_utc": "2026-06-25 09:11:54-07",
+      "notes": "Backfilled audit row for previously generated fixed-period denominator diagnostic report."
     },
     {
       "role": "policy scenario DB load",

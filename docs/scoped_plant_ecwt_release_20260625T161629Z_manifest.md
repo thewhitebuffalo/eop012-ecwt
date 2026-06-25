@@ -2,11 +2,11 @@
 
 - Release ID: `scoped_plant_ecwt_release_20260625T161629Z`
 - Release name: `Scoped plant ECWT release 20260625T161629Z`
-- Manifest run ID: `release_manifest_20260625T163327Z`
-- Generated UTC: 2026-06-25T16:33:27Z
-- Git generation commit: `f144dbc1e4958600d49fb6e064acc971d28b5e4a`
+- Manifest run ID: `release_manifest_20260625T163910Z`
+- Generated UTC: 2026-06-25T16:39:10Z
+- Git generation commit: `ba953a9ff420c8ebfeb242c130104fd92a8cd8ef`
 - Manifest JSON: `docs/scoped_plant_ecwt_release_20260625T161629Z_manifest.json`
-- Manifest JSON SHA-256: `c5cd9c1bb4255834d68c3d13e7da7cb3fb2f52ec80b95c72848e8b2443f4bf45`
+- Manifest JSON SHA-256: `4f2e5eb95b5f2ab3a25bbd0cd2fd7fdc8a6002f7fc70a6b0255b93d092420656`
 
 ## Scope
 
@@ -24,7 +24,7 @@ This release publishes non-Alaska plant-level ECWT rows that passed the normaliz
 | station ECWT | `station_ecwt_loaded_20260625T155645Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4` |
 | fixed-period plant ECWT | `plant_ecwt_provisional_fixed_period_20260625T161041Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4` |
 | fixed-period readiness | `plant_ecwt_readiness_fixed_period_20260625T161109Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4` |
-| denominator diagnostic | `fixed_period_denominator_diagnostic_all-plants_20260625T161153Z` |  | `` |
+| denominator diagnostic | `fixed_period_denominator_diagnostic_all-plants_20260625T161153Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4` |
 | policy scenario DB load | `readiness_policy_scenarios_db_load_20260625T161252Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4` |
 | policy result | `plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_20260625T161313Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4-dirty` |
 | secondary station fill | `secondary_station_fill_ecwt_20260625T161345Z` | succeeded | `bd3c33c8073c2a66057773e07ae474d2b8eb9be4-dirty` |
@@ -54,7 +54,7 @@ This release publishes non-Alaska plant-level ECWT rows that passed the normaliz
 | data_dictionary_md | markdown |  | 28072 | `6d9590b1f7f891f525a5ae9fab3865c3695b7777fbcae198e2e3af21690b5c09` | `docs/data_dictionary.md` |
 | scoped_export_script_py | python |  | 16984 | `b1775734450c92a8ca906a4ffcedd11b2e27dc5a2977945e3a985ddbf1cf456a` | `scripts/export_scoped_plant_ecwt_dataset.py` |
 | manifest_builder_script_py | python |  | 30634 | `87144e5b26798669c031e43cae8f5b01d86807f24ab34609685eafec8cddfc75` | `scripts/build_scoped_release_manifest.py` |
-| release_manifest_json | json |  | 15789 | `c5cd9c1bb4255834d68c3d13e7da7cb3fb2f52ec80b95c72848e8b2443f4bf45` | `docs/scoped_plant_ecwt_release_20260625T161629Z_manifest.json` |
+| release_manifest_json | json |  | 16162 | `4f2e5eb95b5f2ab3a25bbd0cd2fd7fdc8a6002f7fc70a6b0255b93d092420656` | `docs/scoped_plant_ecwt_release_20260625T161629Z_manifest.json` |
 
 ## Database Evidence
 
