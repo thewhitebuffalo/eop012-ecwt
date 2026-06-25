@@ -95,18 +95,101 @@ def latest_run_id(psql: Path, host: str, port: int, dbname: str, pattern: str, u
     return run_id
 
 
+def run_parameters(psql: Path, host: str, port: int, dbname: str, run_id: str, user: str | None) -> dict[str, object]:
+    params = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        f"""
+        select coalesce(parameters_json::text, '{{}}')
+        from audit.calculation_run
+        where calculation_run_id = {sql_literal(run_id)}
+        """,
+        user,
+    )
+    if not params:
+        raise RuntimeError(f"Calculation run not found: {run_id}")
+    return json.loads(params)
+
+
 def build_sql(
     run_id: str,
     candidate_run_id: str,
     station_ecwt_run_id: str,
+    coverage_run_id: str,
     code_commit: str,
+    selection_coverage_policy: str,
+    fixed_min_year: int,
+    fixed_max_year: int,
+    fixed_min_coverage_ratio: float,
+    fixed_min_loaded_years: int,
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
+    fixed_policy = selection_coverage_policy == "fixed-period"
+    if fixed_policy:
+        valid_hour_expr = "coalesce(sf.fixed_valid_djf_hours, 0)"
+        expected_hour_expr = "coalesce(sf.fixed_expected_djf_hours, 0)"
+        missing_hour_expr = "coalesce(sf.fixed_missing_djf_hours, 0)"
+        duplicate_hour_expr = "coalesce(sf.fixed_duplicate_hour_count, 0)"
+        coverage_filter = (
+            f"      and sf.fixed_coverage_ratio >= {fixed_min_coverage_ratio}\n"
+            f"      and sf.loaded_station_year_count >= {fixed_min_loaded_years}"
+        )
+        coverage_span_sql = f"""
+coverage_span as (
+    select
+        station_id,
+        make_timestamptz({fixed_min_year}, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+        make_timestamptz({fixed_max_year}, 12, 31, 23, 0, 0, 'UTC') as segment_end_utc
+    from station_fixed_coverage
+)"""
+        selection_rule = (
+            "For each plant, choose the lowest rank_order candidate station with provisional station ECWT "
+            f"and fixed-period DJF coverage >= {fixed_min_coverage_ratio} across {fixed_min_year}-{fixed_max_year}; "
+            "ties use shortest distance_km, largest fixed-period valid DJF hours, then station_id."
+        )
+        result_status = "provisional only when a candidate station passes fixed-period coverage eligibility, otherwise blocked"
+        success_note = "Selected lowest-rank fixed-period eligible candidate station; ties use distance, fixed-period valid DJF hours, and station id."
+        segment_note = "Selected from fixed-period eligible station ECWT candidates by candidate rank, distance, valid-hour count, and station id."
+        blocked_basis = "No candidate station currently has provisional station ECWT and fixed-period coverage eligibility under the loaded weather set."
+        blocked_note = "Blocked until more NOAA weather is downloaded/loaded or a different candidate station passes the fixed-period coverage gate."
+    else:
+        valid_hour_expr = "se.valid_hour_count"
+        expected_hour_expr = "se.expected_hour_count"
+        missing_hour_expr = "se.missing_hour_count"
+        duplicate_hour_expr = "se.duplicate_hour_count"
+        coverage_filter = ""
+        coverage_span_sql = f"""
+coverage_span as (
+    select
+        station_id,
+        min(period_start_utc) as segment_start_utc,
+        max(period_end_utc) as segment_end_utc
+    from weather.station_year_djf_coverage
+    where calculation_run_id = {sql_literal(coverage_run_id)}
+    group by station_id
+)"""
+        selection_rule = (
+            "For each plant, choose the lowest rank_order candidate station with provisional station ECWT; "
+            "ties use shortest distance_km, largest valid_hour_count, then station_id."
+        )
+        result_status = "provisional unless no candidate station has provisional station ECWT, then blocked"
+        success_note = "Selected lowest-rank candidate station among provisional station ECWT results; ties use distance, loaded valid DJF hours, and station id."
+        segment_note = "Selected from loaded station ECWT candidates by candidate rank, distance, valid-hour count, and station id."
+        blocked_basis = "No candidate station currently has provisional station ECWT under the loaded weather set."
+        blocked_note = "Blocked until more NOAA weather is downloaded/loaded or candidate coverage improves."
     params = {
         "candidate_run_id": candidate_run_id,
         "station_ecwt_run_id": station_ecwt_run_id,
-        "selection_rule": "For each plant, choose the lowest rank_order candidate station with provisional station ECWT; ties use shortest distance_km, largest valid_hour_count, then station_id.",
-        "result_status": "provisional unless no candidate station has provisional station ECWT, then blocked",
+        "coverage_run_id": coverage_run_id,
+        "selection_coverage_policy": selection_coverage_policy,
+        "fixed_min_year": fixed_min_year,
+        "fixed_max_year": fixed_max_year,
+        "fixed_min_coverage_ratio": fixed_min_coverage_ratio,
+        "fixed_min_loaded_years": fixed_min_loaded_years,
+        "selection_rule": selection_rule,
+        "result_status": result_status,
     }
     return f"""
 \\set ON_ERROR_STOP on
@@ -138,17 +221,56 @@ on conflict (calculation_run_id) do update set
     notes = excluded.notes;
 
 create temp table tmp_best_plant_station as
-with candidate_scores as (
+with fixed_years as (
+    select generate_series({fixed_min_year}, {fixed_max_year})::integer as source_year
+),
+fixed_expected_by_year as (
+    select
+        y.source_year,
+        count(*) filter (
+            where extract(month from gs.hour_utc at time zone 'UTC') in (12, 1, 2)
+        )::bigint as expected_djf_hours
+    from fixed_years y
+    cross join lateral generate_series(
+        make_timestamptz(y.source_year, 1, 1, 0, 0, 0, 'UTC'),
+        make_timestamptz(y.source_year, 12, 31, 23, 0, 0, 'UTC'),
+        interval '1 hour'
+    ) as gs(hour_utc)
+    group by y.source_year
+),
+station_fixed_coverage as (
+    select
+        se.station_id,
+        sum(e.expected_djf_hours)::bigint as fixed_expected_djf_hours,
+        coalesce(sum(c.valid_djf_hours), 0)::bigint as fixed_valid_djf_hours,
+        greatest(sum(e.expected_djf_hours) - coalesce(sum(c.valid_djf_hours), 0), 0)::bigint as fixed_missing_djf_hours,
+        coalesce(sum(c.duplicate_hour_count), 0)::bigint as fixed_duplicate_hour_count,
+        count(c.*) filter (where c.loaded_file_count > 0)::integer as loaded_station_year_count,
+        count(c.*) filter (where c.coverage_status = 'complete')::integer as complete_station_year_count,
+        min(c.source_year) filter (where c.loaded_file_count > 0) as first_loaded_year,
+        max(c.source_year) filter (where c.loaded_file_count > 0) as last_loaded_year,
+        coalesce(sum(c.valid_djf_hours), 0)::numeric / nullif(sum(e.expected_djf_hours), 0) as fixed_coverage_ratio
+    from calc.station_ecwt se
+    cross join fixed_expected_by_year e
+    left join weather.station_year_djf_coverage c
+      on c.calculation_run_id = {sql_literal(coverage_run_id)}
+     and c.station_id = se.station_id
+     and c.source_year = e.source_year
+    where se.calculation_run_id = {sql_literal(station_ecwt_run_id)}
+      and se.result_status = 'provisional'
+    group by se.station_id
+),
+candidate_scores as (
     select
         sc.plant_id,
         sc.station_id,
         sc.distance_km,
         sc.rank_order,
         se.station_ecwt_id,
-        se.valid_hour_count,
-        se.expected_hour_count,
-        se.missing_hour_count,
-        se.duplicate_hour_count,
+        {valid_hour_expr}::bigint as valid_hour_count,
+        {expected_hour_expr}::bigint as expected_hour_count,
+        {missing_hour_expr}::bigint as missing_hour_count,
+        {duplicate_hour_expr}::bigint as duplicate_hour_count,
         se.percentile_target,
         se.ecwt_c,
         se.ecwt_f,
@@ -157,12 +279,20 @@ with candidate_scores as (
         se.ecwt_discrete_f,
         se.calculation_cutoff_utc,
         se.result_status as station_ecwt_status,
+        sf.fixed_expected_djf_hours,
+        sf.fixed_valid_djf_hours,
+        sf.fixed_missing_djf_hours,
+        sf.fixed_coverage_ratio,
+        sf.loaded_station_year_count,
+        sf.complete_station_year_count,
+        sf.first_loaded_year,
+        sf.last_loaded_year,
         row_number() over (
             partition by sc.plant_id
             order by
                 sc.rank_order asc nulls last,
                 sc.distance_km asc nulls last,
-                se.valid_hour_count desc nulls last,
+                {valid_hour_expr} desc nulls last,
                 sc.station_id asc
         ) as selection_rank
     from link.station_candidate sc
@@ -171,22 +301,13 @@ with candidate_scores as (
      and se.calculation_run_id = {sql_literal(station_ecwt_run_id)}
      and se.result_status = 'provisional'
      and se.valid_hour_count > 0
+    join station_fixed_coverage sf
+      on sf.station_id = sc.station_id
     where sc.calculation_run_id = {sql_literal(candidate_run_id)}
       and sc.candidate_status = 'candidate'
+{coverage_filter}
 ),
-coverage_span as (
-    select
-        station_id,
-        min(period_start_utc) as segment_start_utc,
-        max(period_end_utc) as segment_end_utc
-    from weather.station_year_djf_coverage
-    where calculation_run_id = (
-        select parameters_json->>'coverage_run_id'
-        from audit.calculation_run
-        where calculation_run_id = {sql_literal(station_ecwt_run_id)}
-    )
-    group by station_id
-)
+{coverage_span_sql}
 select
     cs.*,
     coalesce(cspan.segment_start_utc, make_timestamptz(2000, 1, 1, 0, 0, 0, 'UTC')) as segment_start_utc,
@@ -212,12 +333,12 @@ select
     {sql_literal(METHODOLOGY_VERSION)} as methodology_version,
     case when b.station_id is null then 'blocked' else 'provisional' end as selection_status,
     case
-        when b.station_id is null then 'No candidate station currently has provisional station ECWT under the loaded weather set.'
-        else 'Selected lowest-rank candidate station among provisional station ECWT results; ties use distance, loaded valid DJF hours, and station id.'
+        when b.station_id is null then {sql_literal(blocked_basis)}
+        else {sql_literal(success_note)}
     end as decision_basis,
     null as reviewer,
     case
-        when b.station_id is null then 'Blocked until more NOAA weather is downloaded/loaded or candidate coverage improves.'
+        when b.station_id is null then {sql_literal(blocked_note)}
         else 'Provisional algorithmic selection. May change as NOAA backfill and canonical loading continue.'
     end as notes
 from asset.plant p
@@ -242,8 +363,11 @@ select
     b.station_id,
     b.segment_start_utc,
     b.segment_end_utc,
-    'provisional_ranked_representative_candidate',
-    'Selected from loaded station ECWT candidates by candidate rank, distance, valid-hour count, and station id.'
+    case
+        when {sql_literal(selection_coverage_policy)} = 'fixed-period' then 'provisional_fixed_period_eligible_candidate'
+        else 'provisional_ranked_representative_candidate'
+    end,
+    {sql_literal(segment_note)}
 from tmp_best_plant_station b
 on conflict (station_selection_segment_id) do update set
     station_id = excluded.station_id,
@@ -338,6 +462,12 @@ def render_report(
     run_id: str,
     candidate_run_id: str,
     station_ecwt_run_id: str,
+    coverage_run_id: str,
+    selection_coverage_policy: str,
+    fixed_min_year: int,
+    fixed_max_year: int,
+    fixed_min_coverage_ratio: float,
+    fixed_min_loaded_years: int,
     code_commit: str,
     db_counts: OrderedDict[str, str],
     sample_rows: list[dict[str, str]],
@@ -361,6 +491,11 @@ def render_report(
         f"- Calculation run ID: `{run_id}`",
         f"- Candidate run ID: `{candidate_run_id}`",
         f"- Station ECWT run ID: `{station_ecwt_run_id}`",
+        f"- Coverage run ID: `{coverage_run_id}`",
+        f"- Selection coverage policy: `{selection_coverage_policy}`",
+        f"- Fixed-period coverage years: `{fixed_min_year}-{fixed_max_year}`",
+        f"- Fixed-period minimum coverage ratio: `{fixed_min_coverage_ratio}`",
+        f"- Fixed-period minimum loaded years: `{fixed_min_loaded_years}`",
         f"- Methodology version: `{METHODOLOGY_VERSION}`",
         f"- Code commit: `{code_commit}`",
         "",
@@ -390,7 +525,8 @@ def render_report(
             "## Interpretation",
             "",
             "- These are provisional plant-level ECWT values from the currently loaded canonical weather set.",
-            "- Selection chooses one currently usable candidate station per plant using candidate rank and distance before loaded valid-hour count.",
+            "- Selection chooses one currently usable candidate station per plant using candidate rank and distance before valid-hour count.",
+            "- When `selection_coverage_policy` is `fixed-period`, candidates must also pass the fixed-period coverage gate before they are eligible for selection.",
             "- Results are blocked where no candidate station currently has provisional station ECWT.",
             "- These rows are not final compliance publication values until NOAA coverage, source QA, and station-selection review are complete.",
             "",
@@ -409,6 +545,12 @@ def main() -> int:
     parser.add_argument("--user", default=None)
     parser.add_argument("--candidate-run-id", default=None)
     parser.add_argument("--station-ecwt-run-id", default=None)
+    parser.add_argument("--coverage-run-id", default=None)
+    parser.add_argument("--selection-coverage-policy", choices=["active-window", "fixed-period"], default="active-window")
+    parser.add_argument("--fixed-min-year", type=int, default=2000)
+    parser.add_argument("--fixed-max-year", type=int, default=2025)
+    parser.add_argument("--fixed-min-coverage-ratio", type=float, default=0.95)
+    parser.add_argument("--fixed-min-loaded-years", type=int, default=20)
     args = parser.parse_args()
 
     candidate_run_id = args.candidate_run_id or latest_run_id(
@@ -417,9 +559,32 @@ def main() -> int:
     station_ecwt_run_id = args.station_ecwt_run_id or latest_run_id(
         args.psql, args.host, args.port, args.dbname, "station_ecwt_loaded_%", args.user
     )
+    coverage_run_id = args.coverage_run_id
+    if not coverage_run_id:
+        station_params = run_parameters(args.psql, args.host, args.port, args.dbname, station_ecwt_run_id, args.user)
+        coverage_run_id = str(station_params.get("coverage_run_id") or "")
+    if not coverage_run_id:
+        raise RuntimeError(f"Station ECWT run has no coverage_run_id parameter: {station_ecwt_run_id}")
     code_commit = git_commit_label(args.project_root)
-    run_id = f"plant_ecwt_provisional_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
-    run(psql_cmd(args.psql, args.host, args.port, args.dbname, args.user), input_text=build_sql(run_id, candidate_run_id, station_ecwt_run_id, code_commit))
+    if args.selection_coverage_policy == "fixed-period":
+        run_id = f"plant_ecwt_provisional_fixed_period_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    else:
+        run_id = f"plant_ecwt_provisional_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    run(
+        psql_cmd(args.psql, args.host, args.port, args.dbname, args.user),
+        input_text=build_sql(
+            run_id,
+            candidate_run_id,
+            station_ecwt_run_id,
+            coverage_run_id,
+            code_commit,
+            args.selection_coverage_policy,
+            args.fixed_min_year,
+            args.fixed_max_year,
+            args.fixed_min_coverage_ratio,
+            args.fixed_min_loaded_years,
+        ),
+    )
 
     db_counts = report_counts(args.psql, args.host, args.port, args.dbname, run_id, args.user)
     sample_rows = psql_csv_query(
@@ -452,6 +617,12 @@ def main() -> int:
         run_id,
         candidate_run_id,
         station_ecwt_run_id,
+        coverage_run_id,
+        args.selection_coverage_policy,
+        args.fixed_min_year,
+        args.fixed_max_year,
+        args.fixed_min_coverage_ratio,
+        args.fixed_min_loaded_years,
         code_commit,
         db_counts,
         sample_rows,

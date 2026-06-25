@@ -103,13 +103,117 @@ def build_sql(
     min_coverage_ratio: float,
     coverage_min_year: int,
     coverage_max_year: int,
+    coverage_denominator_mode: str,
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
+    if coverage_denominator_mode == "plant-ecwt-row":
+        coverage_denominator = "plant ECWT row valid/expected DJF hours"
+        readiness_note = (
+            "Readiness classification for provisional plant ECWT using valid/expected hours stored on the plant ECWT row. "
+            "For fixed-period station-selection runs, those row counts come from the fixed-period station-year coverage gate."
+        )
+        source_sql = f"""
+create temp table tmp_readiness_source on commit drop as
+select
+    pr.plant_ecwt_id,
+    pr.plant_id,
+    pr.selected_station_id,
+    pr.valid_hour_count,
+    case
+        when pr.result_status = 'blocked' then 0::bigint
+        else coalesce(pr.loaded_expected_hour_count, 0)::bigint
+    end as expected_hour_count,
+    pr.result_status
+from tmp_readiness_plant_rows pr;
+analyze tmp_readiness_source;
+"""
+    else:
+        coverage_denominator = "fixed selected-station active-period DJF hours"
+        readiness_note = (
+            "Readiness classification for provisional plant ECWT using fixed selected-station active-period DJF expected hours. "
+            "Thresholds are conservative working gates and may change before publication."
+        )
+        source_sql = f"""
+create temp table tmp_readiness_djf_segments on commit drop as
+with years as (
+    select generate_series({coverage_min_year}, {coverage_max_year})::integer as source_year
+)
+select
+    make_timestamptz(source_year, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+    make_timestamptz(source_year, 3, 1, 0, 0, 0, 'UTC') as segment_end_utc
+from years
+union all
+select
+    make_timestamptz(source_year, 12, 1, 0, 0, 0, 'UTC') as segment_start_utc,
+    make_timestamptz(source_year + 1, 1, 1, 0, 0, 0, 'UTC') as segment_end_utc
+from years;
+analyze tmp_readiness_djf_segments;
+
+create temp table tmp_readiness_station_expected on commit drop as
+select
+    ss.station_id,
+    round(
+        coalesce(
+            sum(
+                case
+                    when least(
+                        ds.segment_end_utc,
+                        coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                    ) > greatest(
+                        ds.segment_start_utc,
+                        coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                    )
+                    then extract(
+                        epoch from (
+                            least(
+                                ds.segment_end_utc,
+                                coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
+                            ) - greatest(
+                                ds.segment_start_utc,
+                                coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
+                            )
+                        )
+                    ) / 3600.0
+                    else 0
+                end
+            ),
+            0
+        )
+    )::bigint as expected_hour_count
+from (
+    select distinct selected_station_id as station_id
+    from tmp_readiness_plant_rows
+    where selected_station_id is not null
+) ss
+join weather.station st using (station_id)
+cross join tmp_readiness_djf_segments ds
+group by ss.station_id;
+create unique index tmp_readiness_station_expected_station_idx
+    on tmp_readiness_station_expected (station_id);
+analyze tmp_readiness_station_expected;
+
+create temp table tmp_readiness_source on commit drop as
+select
+    pr.plant_ecwt_id,
+    pr.plant_id,
+    pr.selected_station_id,
+    pr.valid_hour_count,
+    case
+        when pr.result_status = 'blocked' then 0::bigint
+        else coalesce(nullif(se.expected_hour_count, 0), pr.loaded_expected_hour_count, 0)::bigint
+    end as expected_hour_count,
+    pr.result_status
+from tmp_readiness_plant_rows pr
+left join tmp_readiness_station_expected se
+  on se.station_id = pr.selected_station_id;
+analyze tmp_readiness_source;
+"""
     params = {
         "plant_ecwt_run_id": plant_ecwt_run_id,
         "min_valid_hours": min_valid_hours,
         "min_coverage_ratio": min_coverage_ratio,
-        "coverage_denominator": "fixed selected-station active-period DJF hours",
+        "coverage_denominator": coverage_denominator,
+        "coverage_denominator_mode": coverage_denominator_mode,
         "coverage_min_year": coverage_min_year,
         "coverage_max_year": coverage_max_year,
         "readiness_rule": "publication_candidate requires provisional plant ECWT, valid hours >= threshold, fixed expected hours > 0, and coverage ratio >= threshold",
@@ -189,79 +293,7 @@ create index tmp_readiness_plant_rows_station_idx
     on tmp_readiness_plant_rows (selected_station_id);
 analyze tmp_readiness_plant_rows;
 
-create temp table tmp_readiness_djf_segments on commit drop as
-with years as (
-    select generate_series({coverage_min_year}, {coverage_max_year})::integer as source_year
-)
-select
-    make_timestamptz(source_year, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
-    make_timestamptz(source_year, 3, 1, 0, 0, 0, 'UTC') as segment_end_utc
-from years
-union all
-select
-    make_timestamptz(source_year, 12, 1, 0, 0, 0, 'UTC') as segment_start_utc,
-    make_timestamptz(source_year + 1, 1, 1, 0, 0, 0, 'UTC') as segment_end_utc
-from years;
-analyze tmp_readiness_djf_segments;
-
-create temp table tmp_readiness_station_expected on commit drop as
-select
-    ss.station_id,
-    round(
-        coalesce(
-            sum(
-                case
-                    when least(
-                        ds.segment_end_utc,
-                        coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
-                    ) > greatest(
-                        ds.segment_start_utc,
-                        coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
-                    )
-                    then extract(
-                        epoch from (
-                            least(
-                                ds.segment_end_utc,
-                                coalesce(st.last_observation_utc + interval '1 hour', make_timestamptz({coverage_max_year + 1}, 1, 1, 0, 0, 0, 'UTC'))
-                            ) - greatest(
-                                ds.segment_start_utc,
-                                coalesce(st.first_observation_utc, make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC'))
-                            )
-                        )
-                    ) / 3600.0
-                    else 0
-                end
-            ),
-            0
-        )
-    )::bigint as expected_hour_count
-from (
-    select distinct selected_station_id as station_id
-    from tmp_readiness_plant_rows
-    where selected_station_id is not null
-) ss
-join weather.station st using (station_id)
-cross join tmp_readiness_djf_segments ds
-group by ss.station_id;
-create unique index tmp_readiness_station_expected_station_idx
-    on tmp_readiness_station_expected (station_id);
-analyze tmp_readiness_station_expected;
-
-create temp table tmp_readiness_source on commit drop as
-select
-    pr.plant_ecwt_id,
-    pr.plant_id,
-    pr.selected_station_id,
-    pr.valid_hour_count,
-    case
-        when pr.result_status = 'blocked' then 0::bigint
-        else coalesce(nullif(se.expected_hour_count, 0), pr.loaded_expected_hour_count, 0)::bigint
-    end as expected_hour_count,
-    pr.result_status
-from tmp_readiness_plant_rows pr
-left join tmp_readiness_station_expected se
-  on se.station_id = pr.selected_station_id;
-analyze tmp_readiness_source;
+{source_sql}
 
 insert into calc.plant_ecwt_readiness (
     plant_ecwt_readiness_id,
@@ -306,7 +338,7 @@ select
         when (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) < {min_coverage_ratio} then 'coverage_ratio_below_threshold'
         else 'passes_current_publication_gate'
     end as reason_code,
-    'Readiness classification for provisional plant ECWT using fixed selected-station active-period DJF expected hours. Thresholds are conservative working gates and may change before publication.' as notes
+    {sql_literal(readiness_note)} as notes
 from tmp_readiness_source rs
 on conflict (plant_ecwt_readiness_id) do update set
     selected_station_id = excluded.selected_station_id,
@@ -349,6 +381,7 @@ def render_report(
     min_coverage_ratio: float,
     coverage_min_year: int,
     coverage_max_year: int,
+    coverage_denominator_mode: str,
     db_counts: OrderedDict[str, str],
     by_reason: list[dict[str, str]],
     host: str,
@@ -374,7 +407,7 @@ def render_report(
         f"- Code commit: `{code_commit}`",
         f"- Minimum valid hours: `{min_valid_hours}`",
         f"- Minimum coverage ratio: `{min_coverage_ratio}`",
-        f"- Coverage denominator: `fixed selected-station active-period DJF hours`",
+        f"- Coverage denominator mode: `{coverage_denominator_mode}`",
         f"- Coverage year range: `{coverage_min_year}-{coverage_max_year}`",
         "",
         "## Summary",
@@ -393,7 +426,8 @@ def render_report(
             "## Interpretation",
             "",
             "- This is a working publication-readiness gate for provisional plant ECWT rows.",
-            "- Coverage ratios use a fixed selected-station active-period DJF denominator, not only currently loaded station-year files.",
+            "- Coverage ratios use the denominator mode recorded above, not only currently loaded station-year files.",
+            "- For fixed-period plant selection runs, use `plant-ecwt-row` so readiness preserves the fixed-period valid/expected hours stored on `calc.plant_ecwt`.",
             "- `publication_candidate` is not the same as final accepted compliance output; it means the row passes the current coverage thresholds.",
             "- Rows that fail this gate should stay out of a published compliance dataset until more weather coverage or manual review is available.",
             "",
@@ -415,13 +449,21 @@ def main() -> int:
     parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
     parser.add_argument("--coverage-min-year", type=int, default=2000)
     parser.add_argument("--coverage-max-year", type=int, default=2025)
+    parser.add_argument(
+        "--coverage-denominator-mode",
+        choices=["active-station-window", "plant-ecwt-row"],
+        default="active-station-window",
+    )
     args = parser.parse_args()
 
     plant_ecwt_run_id = args.plant_ecwt_run_id or latest_plant_ecwt_run_id(
         args.psql, args.host, args.port, args.dbname, args.user
     )
     code_commit = git_commit_label(args.project_root)
-    run_id = f"plant_ecwt_readiness_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    if args.coverage_denominator_mode == "plant-ecwt-row":
+        run_id = f"plant_ecwt_readiness_fixed_period_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
+    else:
+        run_id = f"plant_ecwt_readiness_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     run(
         psql_cmd(args.psql, args.host, args.port, args.dbname, args.user),
         input_text=build_sql(
@@ -432,6 +474,7 @@ def main() -> int:
             args.min_coverage_ratio,
             args.coverage_min_year,
             args.coverage_max_year,
+            args.coverage_denominator_mode,
         ),
     )
 
@@ -460,6 +503,7 @@ def main() -> int:
         args.min_coverage_ratio,
         args.coverage_min_year,
         args.coverage_max_year,
+        args.coverage_denominator_mode,
         db_counts,
         by_reason,
         args.host,
