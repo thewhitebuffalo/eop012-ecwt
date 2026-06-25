@@ -211,6 +211,14 @@ plausibility rejection blockers. For this near-threshold set, the issue is NOAA
 source sparsity/invalid temperature observations, not corrupted downloads,
 missing AWS bulk objects, or canonical-loader loss.
 
+The follow-on remediation check is captured in
+`near_threshold_remediation_assessment_20260625T063050Z.md`. All 1,004
+near-threshold plant blockers have multiple station candidates, but 0 have an
+alternate candidate that already passes the normalized active-window coverage
+gate under the current candidate table. The near-threshold path therefore points
+to station-candidate expansion, invalid-`TMP` methodology policy, or coverage
+gate policy, not a simple second-candidate switch.
+
 ## Guardrail Added
 
 `scripts/inventory_noaa_raw_files.py` now auto-includes existing NOAA raw roots referenced by `weather.noaa_hourly_load_file`, unless `--no-include-loaded-roots` is supplied. This prevents an incremental rebuild from omitting a cache root and creating duplicate AWS download work.
