@@ -322,6 +322,39 @@ def fetch_station_rows(
     )
 
 
+def fetch_all_geocoded_station_rows(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+) -> list[dict[str, object]]:
+    rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        """
+        select
+            station_id,
+            latitude::text,
+            longitude::text
+        from weather.station
+        where latitude is not null
+          and longitude is not null
+        """,
+    )
+    return [
+        {
+            "station_id": row["station_id"],
+            "latitude": float_value(row["latitude"]),
+            "longitude": float_value(row["longitude"]),
+        }
+        for row in rows
+    ]
+
+
 def fetch_coverage_rows(
     psql: Path,
     host: str,
@@ -487,6 +520,7 @@ PLANT_FIELDS = [
     "passing_station_count_within_radius",
     "nearest_pass_radius_bucket_km",
     "nearest_pass_rank_order_within_radius",
+    "nearest_pass_rank_order_all_stations",
     "nearest_pass_station_id",
     "nearest_pass_station_name",
     "nearest_pass_station_state",
@@ -521,6 +555,7 @@ RADIUS_FIELDS = [
     "median_nearest_pass_distance_km",
     "max_nearest_pass_distance_km",
     "median_nearest_pass_rank_order",
+    "median_nearest_pass_all_station_rank_order",
 ]
 
 
@@ -545,10 +580,12 @@ def build_rows(
     station_ecwt_run_id: str,
     plants: list[dict[str, str]],
     station_metrics: list[dict[str, object]],
+    all_stations: list[dict[str, object]],
     radii: list[float],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
     max_radius = max(radii)
     grid = station_grid(station_metrics)
+    all_station_grid = station_grid(all_stations)
     plant_rows: list[dict[str, object]] = []
 
     for plant in plants:
@@ -558,8 +595,14 @@ def build_rows(
         passing = [(idx, distance, station) for idx, (distance, station) in enumerate(nearby, start=1) if station["window_pass"]]
         nearest = passing[0] if passing else None
         pass_radius = None
+        all_station_rank = None
         if nearest:
             pass_radius = next((radius for radius in radii if nearest[1] <= radius), None)
+            all_nearby = nearby_stations(plant_lat, plant_lon, all_station_grid, max_radius)
+            for all_rank, (_, all_station) in enumerate(all_nearby, start=1):
+                if all_station["station_id"] == nearest[2]["station_id"]:
+                    all_station_rank = all_rank
+                    break
         passing_count = len(passing)
         if nearest:
             rank, distance, station = nearest
@@ -604,6 +647,7 @@ def build_rows(
                 "passing_station_count_within_radius": passing_count,
                 "nearest_pass_radius_bucket_km": fmt_float(pass_radius, 3) if pass_radius is not None else "",
                 "nearest_pass_rank_order_within_radius": rank or "",
+                "nearest_pass_rank_order_all_stations": all_station_rank or "",
                 "nearest_pass_station_id": station.get("station_id", ""),
                 "nearest_pass_station_name": station.get("station_name", ""),
                 "nearest_pass_station_state": station.get("station_state", ""),
@@ -640,6 +684,7 @@ def build_rows(
         ]
         distances = [float_value(row["nearest_pass_distance_km"]) for row in passing_at_radius]
         ranks = [int_value(row["nearest_pass_rank_order_within_radius"]) for row in passing_at_radius]
+        all_station_ranks = [int_value(row["nearest_pass_rank_order_all_stations"]) for row in passing_at_radius]
         radius_rows.append(
             {
                 "scenario_run_id": run_id,
@@ -655,6 +700,9 @@ def build_rows(
                 "median_nearest_pass_distance_km": fmt_float(median(distances), 3) if distances else "",
                 "max_nearest_pass_distance_km": fmt_float(max(distances), 3) if distances else "",
                 "median_nearest_pass_rank_order": fmt_float(median(ranks), 1) if ranks else "",
+                "median_nearest_pass_all_station_rank_order": fmt_float(median(all_station_ranks), 1)
+                if all_station_ranks
+                else "",
             }
         )
 
@@ -750,6 +798,7 @@ create table if not exists calc.expanded_candidate_coverage_scenario_plant (
     passing_station_count_within_radius bigint,
     nearest_pass_radius_bucket_km numeric,
     nearest_pass_rank_order_within_radius integer,
+    nearest_pass_rank_order_all_stations integer,
     nearest_pass_station_id text,
     nearest_pass_station_name text,
     nearest_pass_station_state text,
@@ -774,6 +823,8 @@ create index if not exists ix_expanded_candidate_scenario_plant_status
     on calc.expanded_candidate_coverage_scenario_plant (scenario_run_id, scenario_status, nearest_pass_radius_bucket_km);
 create index if not exists ix_expanded_candidate_scenario_plant_station
     on calc.expanded_candidate_coverage_scenario_plant (scenario_run_id, nearest_pass_station_id);
+alter table calc.expanded_candidate_coverage_scenario_plant
+    add column if not exists nearest_pass_rank_order_all_stations integer;
 
 create table if not exists calc.expanded_candidate_coverage_scenario_radius_summary (
     scenario_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -789,9 +840,12 @@ create table if not exists calc.expanded_candidate_coverage_scenario_radius_summ
     median_nearest_pass_distance_km numeric,
     max_nearest_pass_distance_km numeric,
     median_nearest_pass_rank_order numeric,
+    median_nearest_pass_all_station_rank_order numeric,
     created_at_utc timestamptz not null default now(),
     primary key (scenario_run_id, radius_km)
 );
+alter table calc.expanded_candidate_coverage_scenario_radius_summary
+    add column if not exists median_nearest_pass_all_station_rank_order numeric;
 
 create table if not exists calc.expanded_candidate_coverage_scenario_state_summary (
     scenario_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -879,6 +933,7 @@ insert into calc.expanded_candidate_coverage_scenario_plant (
     passing_station_count_within_radius,
     nearest_pass_radius_bucket_km,
     nearest_pass_rank_order_within_radius,
+    nearest_pass_rank_order_all_stations,
     nearest_pass_station_id,
     nearest_pass_station_name,
     nearest_pass_station_state,
@@ -930,6 +985,7 @@ select
     {cast_null("passing_station_count_within_radius", "bigint")},
     {cast_null("nearest_pass_radius_bucket_km", "numeric")},
     {cast_null("nearest_pass_rank_order_within_radius", "integer")},
+    {cast_null("nearest_pass_rank_order_all_stations", "integer")},
     {text_null("nearest_pass_station_id")},
     {text_null("nearest_pass_station_name")},
     {text_null("nearest_pass_station_state")},
@@ -962,7 +1018,8 @@ insert into calc.expanded_candidate_coverage_scenario_radius_summary (
     min_nearest_pass_distance_km,
     median_nearest_pass_distance_km,
     max_nearest_pass_distance_km,
-    median_nearest_pass_rank_order
+    median_nearest_pass_rank_order,
+    median_nearest_pass_all_station_rank_order
 )
 select
     {text_null("scenario_run_id")},
@@ -977,7 +1034,8 @@ select
     {cast_null("min_nearest_pass_distance_km", "numeric")},
     {cast_null("median_nearest_pass_distance_km", "numeric")},
     {cast_null("max_nearest_pass_distance_km", "numeric")},
-    {cast_null("median_nearest_pass_rank_order", "numeric")}
+    {cast_null("median_nearest_pass_rank_order", "numeric")},
+    {cast_null("median_nearest_pass_all_station_rank_order", "numeric")}
 from tmp_expanded_candidate_radius;
 
 insert into calc.expanded_candidate_coverage_scenario_state_summary (
@@ -1030,6 +1088,7 @@ def render_report(
     status_counts = Counter(row["scenario_status"] for row in plant_rows)
     pass_rows = [row for row in plant_rows if row["scenario_status"] == "expanded_candidate_passes_coverage_gate"]
     rank_values = [int_value(row["nearest_pass_rank_order_within_radius"]) for row in pass_rows]
+    all_station_rank_values = [int_value(row["nearest_pass_rank_order_all_stations"]) for row in pass_rows]
     bucket_counts = Counter(str(row["nearest_pass_radius_bucket_km"]) for row in pass_rows if row["nearest_pass_radius_bucket_km"])
     top_states = [
         {
@@ -1054,6 +1113,7 @@ def render_report(
             "pass_station": row["nearest_pass_station_id"],
             "distance": row["nearest_pass_distance_km"],
             "rank": row["nearest_pass_rank_order_within_radius"],
+            "all_rank": row["nearest_pass_rank_order_all_stations"],
             "coverage": row["nearest_pass_normalized_coverage_ratio"],
             "ecwt_f": row["nearest_pass_station_ecwt_f"],
         }
@@ -1068,6 +1128,7 @@ def render_report(
             "pass_rate": row["pass_rate"],
             "median_distance": row["median_nearest_pass_distance_km"],
             "median_rank": row["median_nearest_pass_rank_order"],
+            "median_all_rank": row["median_nearest_pass_all_station_rank_order"],
         }
         for row in radius_rows
     ]
@@ -1094,15 +1155,36 @@ def render_report(
         f"| Plants with passing expanded station within max radius | {len(pass_rows):,} |",
         f"| Plants without passing expanded station within max radius | {status_counts.get('no_passing_station_within_search_radius', 0):,} |",
         f"| Median nearest passing station rank among loaded stations | {median(rank_values):.1f} |" if rank_values else "| Median nearest passing station rank among loaded stations |  |",
+        f"| Median nearest passing station rank among all station-history rows | {median(all_station_rank_values):.1f} |"
+        if all_station_rank_values
+        else "| Median nearest passing station rank among all station-history rows |  |",
         "",
         "## Radius Summary",
         "",
     ]
     render_table(
         lines,
-        ["Radius km", "Plants", "Passing", "Not Passing", "Pass Rate", "Median Distance km", "Median Rank"],
+        [
+            "Radius km",
+            "Plants",
+            "Passing",
+            "Not Passing",
+            "Pass Rate",
+            "Median Distance km",
+            "Median Loaded Rank",
+            "Median All-Station Rank",
+        ],
         radius_display,
-        ["radius", "plants", "passing", "not_passing", "pass_rate", "median_distance", "median_rank"],
+        [
+            "radius",
+            "plants",
+            "passing",
+            "not_passing",
+            "pass_rate",
+            "median_distance",
+            "median_rank",
+            "median_all_rank",
+        ],
     )
     lines.extend(["", "## Nearest Passing Radius Buckets", "", "| Bucket km | Plants |", "| --- | ---: |"])
     for bucket, count in sorted(bucket_counts.items(), key=lambda item: float_value(item[0])):
@@ -1117,9 +1199,9 @@ def render_report(
     lines.extend(["", "## Nearest Passing Examples", ""])
     render_table(
         lines,
-        ["Plant", "State", "Current Station", "Pass Station", "Distance km", "Rank", "Coverage", "ECWT F"],
+        ["Plant", "State", "Current Station", "Pass Station", "Distance km", "Loaded Rank", "All Rank", "Coverage", "ECWT F"],
         examples,
-        ["plant", "state", "current", "pass_station", "distance", "rank", "coverage", "ecwt_f"],
+        ["plant", "state", "current", "pass_station", "distance", "rank", "all_rank", "coverage", "ecwt_f"],
     )
     lines.extend(
         [
@@ -1190,6 +1272,7 @@ def main() -> int:
     plants = fetch_priority_rows(args.psql, args.host, args.port, args.dbname, args.user, priority_run_id, args.max_gap_hours)
     station_ecwt = fetch_station_ecwt_rows(args.psql, args.host, args.port, args.dbname, args.user, station_ecwt_run_id)
     stations = fetch_station_rows(args.psql, args.host, args.port, args.dbname, args.user, station_ecwt_run_id)
+    all_stations = fetch_all_geocoded_station_rows(args.psql, args.host, args.port, args.dbname, args.user)
     coverage = fetch_coverage_rows(
         args.psql,
         args.host,
@@ -1217,6 +1300,7 @@ def main() -> int:
         station_ecwt_run_id,
         plants,
         station_metrics,
+        all_stations,
         radii,
     )
 
@@ -1246,6 +1330,7 @@ def main() -> int:
         "min_loaded_year_ratio": args.min_loaded_year_ratio,
         "plant_rows": len(plant_rows),
         "station_metric_rows": len(station_metrics),
+        "all_geocoded_station_rows": len(all_stations),
     }
     started_at = utc_now().isoformat(timespec="seconds")
     sql = build_load_sql(run_id, code_commit, started_at, params, plant_staging, radius_staging, state_staging)
