@@ -788,6 +788,8 @@ insert into audit.calculation_run (
     'Compared near-threshold raw NOAA station-year files with canonical weather.hourly_djf rows and classified missing expected-window hours.'
 )
 on conflict (calculation_run_id) do update set
+    code_commit = excluded.code_commit,
+    run_started_at_utc = excluded.run_started_at_utc,
     run_finished_at_utc = excluded.run_finished_at_utc,
     run_status = excluded.run_status,
     parameters_json = excluded.parameters_json,
