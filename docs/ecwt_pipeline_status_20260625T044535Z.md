@@ -1,6 +1,6 @@
 # ECWT Pipeline Status
 
-Generated UTC: 2026-06-25T05:53:57Z
+Generated UTC: 2026-06-25T06:01:22Z
 
 ## Current Checkpoint
 
@@ -15,6 +15,7 @@ Generated UTC: 2026-06-25T05:53:57Z
 | Readiness policy scenario DB load | `readiness_policy_scenarios_db_load_20260625T054908Z` | 5 scenarios; 20,039 candidate rows |
 | Station-selection review seed | `station_selection_review_seed_20260625T055346Z` | 162 review rows; 0 release-ready rows |
 | Station-selection policy scenarios | `station_selection_policy_scenarios_20260625T055356Z` | 8 scenarios; 162 current fixed-period candidates |
+| Normalized coverage blocker priority | `normalized_active_window_blocker_priority_20260625T060119Z` | 7,234 plant blockers; 639 station summaries; 50 state summaries |
 
 ## Plant Readiness
 
@@ -159,6 +160,20 @@ This report is read-only and applies no policy override. It shows that the
 current gate accepts 0 rows, `us_ca_practical` would accept 108 rows, and
 `us_ca_distance_cap_150` or `fixed_coverage_only` would accept all 162 current
 fixed-period candidates if the methodology explicitly allowed those policies.
+
+The remaining 7,234 first-operable plants that still fail the conservative
+normalized active-window coverage screen are now prioritized in
+`normalized_active_window_blocker_priority_20260625T060119Z_report.md`, with
+detail rows in `normalized_active_window_blocker_priority_20260625T060119Z_plants.csv`,
+station summaries in `normalized_active_window_blocker_priority_20260625T060119Z_stations.csv`,
+and state summaries in `normalized_active_window_blocker_priority_20260625T060119Z_states.csv`.
+The same rows are queryable in Postgres under `calc.coverage_blocker_priority`,
+`calc.coverage_blocker_station_summary`, and `calc.coverage_blocker_state_summary`.
+The priority gap buckets show 156 plants within 24 valid DJF hours of the 0.95
+normalized active-window threshold, 848 more within 168 hours, 1,351 within 720
+hours, 3,047 within 2,160 hours, and 1,832 above 2,160 hours. This is a triage
+queue for coverage/methodology remediation; it does not change readiness or
+release status.
 
 ## Guardrail Added
 
