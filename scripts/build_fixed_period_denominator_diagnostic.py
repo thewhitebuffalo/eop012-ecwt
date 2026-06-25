@@ -242,7 +242,9 @@ def candidate_rows_query(
     """
 
 
-def coverage_rows_query(coverage_run_id: str, min_year: int, max_year: int) -> str:
+def coverage_rows_query(coverage_run_id: str, coverage_table: str, min_year: int, max_year: int) -> str:
+    if coverage_table not in {"weather.station_year_djf_coverage", "weather.station_year_djf_coverage_current"}:
+        raise ValueError(f"Unsupported coverage table: {coverage_table}")
     return f"""
     select
         station_id,
@@ -252,7 +254,7 @@ def coverage_rows_query(coverage_run_id: str, min_year: int, max_year: int) -> s
         duplicate_hour_count::text as duplicate_hour_count,
         loaded_file_count::text as loaded_file_count,
         coverage_status
-    from weather.station_year_djf_coverage
+    from {coverage_table}
     where calculation_run_id = {sql_literal(coverage_run_id)}
       and source_year between {min_year} and {max_year}
     """
@@ -710,6 +712,7 @@ def render_report(
     candidate_run_id: str,
     station_ecwt_run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     fixed_min_year: int,
     fixed_max_year: int,
     fixed_min_coverage_ratio: float,
@@ -796,6 +799,7 @@ def render_report(
         f"- Candidate run ID: `{candidate_run_id}`",
         f"- Station ECWT run ID: `{station_ecwt_run_id}`",
         f"- Station-year coverage run ID: `{coverage_run_id}`",
+        f"- Station-year coverage table: `{coverage_table}`",
         f"- Fixed period: `{fixed_min_year}-{fixed_max_year}`",
         f"- Fixed minimum coverage ratio: `{fixed_min_coverage_ratio}`",
         f"- Fixed minimum loaded station-years: `{fixed_min_loaded_years}`",
@@ -887,7 +891,7 @@ def render_report(
             "",
             "- The current fixed-period gate uses the full 2000-2025 DJF denominator for station eligibility, plus a 20 loaded station-year minimum.",
             "- The raw active-window sensitivity uses NOAA station first/last observation metadata to shrink the expected-hour denominator before testing coverage.",
-            "- The normalized active-window sensitivity expands each station window to the union of NOAA station metadata bounds and full loaded station-years observed in `weather.station_year_djf_coverage`.",
+            f"- The normalized active-window sensitivity expands each station window to the union of NOAA station metadata bounds and full loaded station-years observed in `{coverage_table}`.",
             "- A large active-window pass count means the full fixed-period denominator is the dominant blocker for many plants.",
             "- Raw active-window ratios above 1.00 are a warning sign, not a pass recommendation: they mean the loaded annual file contributes more valid DJF hours than the station metadata active window expects.",
             "- Normalized active-window overfill counts should be zero or near zero; nonzero values would indicate the normalization rule still understates actual loaded observations.",
@@ -921,6 +925,7 @@ def main() -> None:
     candidate_run_id = str(params["candidate_run_id"])
     station_ecwt_run_id = str(params["station_ecwt_run_id"])
     coverage_run_id = str(params["coverage_run_id"])
+    coverage_table = str(params.get("coverage_table") or "weather.station_year_djf_coverage")
     fixed_min_year = int(params["fixed_min_year"])
     fixed_max_year = int(params["fixed_max_year"])
     fixed_min_coverage_ratio = float(params["fixed_min_coverage_ratio"])
@@ -949,7 +954,7 @@ def main() -> None:
         args.port,
         args.dbname,
         args.user,
-        coverage_rows_query(coverage_run_id, fixed_min_year, fixed_max_year),
+        coverage_rows_query(coverage_run_id, coverage_table, fixed_min_year, fixed_max_year),
     )
     station_metrics = build_station_metrics(candidates, coverage_rows, fixed_min_year, fixed_max_year)
     rows = build_detail_rows(
@@ -976,6 +981,7 @@ def main() -> None:
         candidate_run_id,
         station_ecwt_run_id,
         coverage_run_id,
+        coverage_table,
         fixed_min_year,
         fixed_max_year,
         fixed_min_coverage_ratio,
@@ -991,6 +997,7 @@ def main() -> None:
                     ("run_id", run_id),
                     ("plant_scope", args.plant_scope),
                     ("plant_ecwt_run_id", plant_ecwt_run_id),
+                    ("coverage_table", coverage_table),
                     ("blocked_rows", len(rows)),
                     ("candidate_rows", len(candidates)),
                     ("coverage_rows", len(coverage_rows)),
