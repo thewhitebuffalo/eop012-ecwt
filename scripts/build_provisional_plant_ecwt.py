@@ -113,11 +113,75 @@ def run_parameters(psql: Path, host: str, port: int, dbname: str, run_id: str, u
     return json.loads(params)
 
 
+def relation_exists(psql: Path, host: str, port: int, dbname: str, relation_name: str, user: str | None) -> bool:
+    exists = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        f"select to_regclass({sql_literal(relation_name)}) is not null;",
+        user,
+    )
+    return exists.lower() == "t"
+
+
+def coverage_row_count(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    coverage_run_id: str,
+    coverage_table: str,
+    user: str | None,
+) -> int:
+    return int(
+        psql_scalar(
+            psql,
+            host,
+            port,
+            dbname,
+            f"select count(*) from {coverage_table} where calculation_run_id = {sql_literal(coverage_run_id)};",
+            user,
+        )
+        or "0"
+    )
+
+
+def resolve_coverage_table(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    coverage_run_id: str,
+    coverage_source: str,
+    preferred_table: str | None,
+    user: str | None,
+) -> str:
+    valid_tables = {
+        "weather.station_year_djf_coverage",
+        "weather.station_year_djf_coverage_current",
+    }
+    if coverage_source == "history":
+        return "weather.station_year_djf_coverage"
+    if coverage_source == "current":
+        return "weather.station_year_djf_coverage_current"
+    if preferred_table in valid_tables and relation_exists(psql, host, port, dbname, preferred_table, user):
+        if coverage_row_count(psql, host, port, dbname, coverage_run_id, preferred_table, user) > 0:
+            return preferred_table
+    current_table = "weather.station_year_djf_coverage_current"
+    if relation_exists(psql, host, port, dbname, current_table, user) and coverage_row_count(
+        psql, host, port, dbname, coverage_run_id, current_table, user
+    ) > 0:
+        return current_table
+    return "weather.station_year_djf_coverage"
+
+
 def build_sql(
     run_id: str,
     candidate_run_id: str,
     station_ecwt_run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     code_commit: str,
     selection_coverage_policy: str,
     fixed_min_year: int,
@@ -126,6 +190,8 @@ def build_sql(
     fixed_min_loaded_years: int,
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
+    if coverage_table not in {"weather.station_year_djf_coverage", "weather.station_year_djf_coverage_current"}:
+        raise ValueError("Unexpected coverage table.")
     fixed_policy = selection_coverage_policy == "fixed-period"
     if fixed_policy:
         valid_hour_expr = "coalesce(sf.fixed_valid_djf_hours, 0)"
@@ -138,12 +204,12 @@ def build_sql(
         )
         coverage_span_sql = f"""
 coverage_span as (
-    select
-        station_id,
-        make_timestamptz({fixed_min_year}, 1, 1, 0, 0, 0, 'UTC') as segment_start_utc,
-        make_timestamptz({fixed_max_year}, 12, 31, 23, 0, 0, 'UTC') as segment_end_utc
-    from station_fixed_coverage
-)"""
+	    select
+	        station_id,
+	        make_timestamptz({fixed_min_year}, 1, 1, 0, 0, 0.0, 'UTC') as segment_start_utc,
+	        make_timestamptz({fixed_max_year}, 12, 31, 23, 0, 0.0, 'UTC') as segment_end_utc
+	    from station_fixed_coverage
+	)"""
         selection_rule = (
             "For each plant, choose the lowest rank_order candidate station with provisional station ECWT "
             f"and fixed-period DJF coverage >= {fixed_min_coverage_ratio} across {fixed_min_year}-{fixed_max_year}; "
@@ -164,12 +230,12 @@ coverage_span as (
 coverage_span as (
     select
         station_id,
-        min(period_start_utc) as segment_start_utc,
-        max(period_end_utc) as segment_end_utc
-    from weather.station_year_djf_coverage
-    where calculation_run_id = {sql_literal(coverage_run_id)}
-    group by station_id
-)"""
+	        min(period_start_utc) as segment_start_utc,
+	        max(period_end_utc) as segment_end_utc
+	    from {coverage_table}
+	    where calculation_run_id = {sql_literal(coverage_run_id)}
+	    group by station_id
+	)"""
         selection_rule = (
             "For each plant, choose the lowest rank_order candidate station with provisional station ECWT; "
             "ties use shortest distance_km, largest valid_hour_count, then station_id."
@@ -183,6 +249,7 @@ coverage_span as (
         "candidate_run_id": candidate_run_id,
         "station_ecwt_run_id": station_ecwt_run_id,
         "coverage_run_id": coverage_run_id,
+        "coverage_table": coverage_table,
         "selection_coverage_policy": selection_coverage_policy,
         "fixed_min_year": fixed_min_year,
         "fixed_max_year": fixed_max_year,
@@ -230,12 +297,12 @@ fixed_expected_by_year as (
         count(*) filter (
             where extract(month from gs.hour_utc at time zone 'UTC') in (12, 1, 2)
         )::bigint as expected_djf_hours
-    from fixed_years y
-    cross join lateral generate_series(
-        make_timestamptz(y.source_year, 1, 1, 0, 0, 0, 'UTC'),
-        make_timestamptz(y.source_year, 12, 31, 23, 0, 0, 'UTC'),
-        interval '1 hour'
-    ) as gs(hour_utc)
+	    from fixed_years y
+	    cross join lateral generate_series(
+	        make_timestamptz(y.source_year, 1, 1, 0, 0, 0.0, 'UTC'),
+	        make_timestamptz(y.source_year, 12, 31, 23, 0, 0.0, 'UTC'),
+	        interval '1 hour'
+	    ) as gs(hour_utc)
     group by y.source_year
 ),
 station_fixed_coverage as (
@@ -252,10 +319,10 @@ station_fixed_coverage as (
         coalesce(sum(c.valid_djf_hours), 0)::numeric / nullif(sum(e.expected_djf_hours), 0) as fixed_coverage_ratio
     from calc.station_ecwt se
     cross join fixed_expected_by_year e
-    left join weather.station_year_djf_coverage c
-      on c.calculation_run_id = {sql_literal(coverage_run_id)}
-     and c.station_id = se.station_id
-     and c.source_year = e.source_year
+	    left join {coverage_table} c
+	      on c.calculation_run_id = {sql_literal(coverage_run_id)}
+	     and c.station_id = se.station_id
+	     and c.source_year = e.source_year
     where se.calculation_run_id = {sql_literal(station_ecwt_run_id)}
       and se.result_status = 'provisional'
     group by se.station_id
@@ -309,9 +376,9 @@ candidate_scores as (
 ),
 {coverage_span_sql}
 select
-    cs.*,
-    coalesce(cspan.segment_start_utc, make_timestamptz(2000, 1, 1, 0, 0, 0, 'UTC')) as segment_start_utc,
-    coalesce(cspan.segment_end_utc, cs.calculation_cutoff_utc) as segment_end_utc
+	    cs.*,
+	    coalesce(cspan.segment_start_utc, make_timestamptz(2000, 1, 1, 0, 0, 0.0, 'UTC')) as segment_start_utc,
+	    coalesce(cspan.segment_end_utc, cs.calculation_cutoff_utc) as segment_end_utc
 from candidate_scores cs
 left join coverage_span cspan using (station_id)
 where cs.selection_rank = 1;
@@ -463,6 +530,7 @@ def render_report(
     candidate_run_id: str,
     station_ecwt_run_id: str,
     coverage_run_id: str,
+    coverage_table: str,
     selection_coverage_policy: str,
     fixed_min_year: int,
     fixed_max_year: int,
@@ -492,6 +560,7 @@ def render_report(
         f"- Candidate run ID: `{candidate_run_id}`",
         f"- Station ECWT run ID: `{station_ecwt_run_id}`",
         f"- Coverage run ID: `{coverage_run_id}`",
+        f"- Coverage table: `{coverage_table}`",
         f"- Selection coverage policy: `{selection_coverage_policy}`",
         f"- Fixed-period coverage years: `{fixed_min_year}-{fixed_max_year}`",
         f"- Fixed-period minimum coverage ratio: `{fixed_min_coverage_ratio}`",
@@ -546,6 +615,12 @@ def main() -> int:
     parser.add_argument("--candidate-run-id", default=None)
     parser.add_argument("--station-ecwt-run-id", default=None)
     parser.add_argument("--coverage-run-id", default=None)
+    parser.add_argument(
+        "--coverage-source",
+        choices=["auto", "current", "history"],
+        default="auto",
+        help="Coverage relation to read. Auto prefers the station ECWT run's coverage table, then compact current coverage.",
+    )
     parser.add_argument("--selection-coverage-policy", choices=["active-window", "fixed-period"], default="active-window")
     parser.add_argument("--fixed-min-year", type=int, default=2000)
     parser.add_argument("--fixed-max-year", type=int, default=2025)
@@ -560,11 +635,23 @@ def main() -> int:
         args.psql, args.host, args.port, args.dbname, "station_ecwt_loaded_%", args.user
     )
     coverage_run_id = args.coverage_run_id
+    station_params: dict[str, object] = {}
     if not coverage_run_id:
         station_params = run_parameters(args.psql, args.host, args.port, args.dbname, station_ecwt_run_id, args.user)
         coverage_run_id = str(station_params.get("coverage_run_id") or "")
     if not coverage_run_id:
         raise RuntimeError(f"Station ECWT run has no coverage_run_id parameter: {station_ecwt_run_id}")
+    preferred_coverage_table = str(station_params.get("coverage_table") or "") if station_params else None
+    coverage_table = resolve_coverage_table(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        coverage_run_id,
+        args.coverage_source,
+        preferred_coverage_table,
+        args.user,
+    )
     code_commit = git_commit_label(args.project_root)
     if args.selection_coverage_policy == "fixed-period":
         run_id = f"plant_ecwt_provisional_fixed_period_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
@@ -577,6 +664,7 @@ def main() -> int:
             candidate_run_id,
             station_ecwt_run_id,
             coverage_run_id,
+            coverage_table,
             code_commit,
             args.selection_coverage_policy,
             args.fixed_min_year,
@@ -618,6 +706,7 @@ def main() -> int:
         candidate_run_id,
         station_ecwt_run_id,
         coverage_run_id,
+        coverage_table,
         args.selection_coverage_policy,
         args.fixed_min_year,
         args.fixed_max_year,
