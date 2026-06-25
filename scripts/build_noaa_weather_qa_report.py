@@ -641,6 +641,13 @@ def render_report(
         max_station_observations,
         ["station_id", "hour_ending_utc", "dry_bulb_f", "dry_bulb_c", "quality_flags", "source_file_id"],
     )
+    if reconciliation_rows:
+        reconciliation_note = (
+            "- Count mismatches mean the current parser policy does not reproduce historical per-file load statistics. "
+            "In this rebuild, observed mismatches should be resolved through a targeted policy refresh or explicitly documented before publication."
+        )
+    else:
+        reconciliation_note = "- Reconstructed plausibility rejects match the database load-file counters exactly for the checked files."
     lines.extend(
         [
             "",
@@ -648,7 +655,7 @@ def render_report(
             "",
             "- Plausibility rejects are reconstructed from source CSV files because the canonical loader currently stores reject counts by file, not row-level reject details.",
             "- Reject reconstruction is scoped to files with historical reject counts; it is a reconciliation check, not a full raw-cache scan.",
-            "- Count mismatches mean the current parser policy does not reproduce historical per-file load statistics. In this rebuild, the observed mismatches are compatible with earlier load runs that predated the current SHEF-specific temperature floor.",
+            reconciliation_note,
             "- The canonical weather guardrails test the rows actually available to ECWT. Publication should block if canonical rows violate the absolute temperature window or if SHEF rows below the SHEF floor are present.",
             "- The warmest station ECWT row is driven by a station with one valid DJF hour. The strict plant readiness gate prevents such low-hour stations from becoming publication candidates, but station-level provisional outputs still need QA flags.",
             "- The presence of warm station ECWT outliers reinforces that publication should use `calc.plant_ecwt_readiness` strict candidates, not raw provisional station or plant ECWT rows.",
