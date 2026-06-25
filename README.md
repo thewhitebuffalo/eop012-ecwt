@@ -1,4 +1,4 @@
-# EOP012 Rebuild
+# EOP012 Database Build
 
 Goal: calculate a documented Extreme Cold Weather Temperature (ECWT) for U.S. generating plants using a clean plant/generator universe, representative weather-source selection, and auditable ECWT calculations.
 
