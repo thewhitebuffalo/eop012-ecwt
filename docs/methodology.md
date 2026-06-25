@@ -9,15 +9,35 @@ The goal is to calculate a documented Extreme Cold Weather Temperature (ECWT) fo
 - EOP-012 candidate units
 - reviewed EOP-012 applicable units, if a defensible applicability review is later added
 
+The current public dataset is a scoped plant-level analytical release, not a final Generator Owner compliance filing. It is intended to make the national calculation reproducible, reviewable, and useful for plant-by-plant follow-up. Unit-level compliance determinations, plant-owner representativeness reviews, and entity-specific applicability reviews remain downstream work.
+
+Current publication scope:
+
+- Include non-Alaska EIA-860 plant rows with a publication-ready ECWT under the documented automated methodology.
+- Exclude Alaska from the current scoped release by project decision. Alaska plants remain in the database and can be recalculated in a separate Alaska-specific scope.
+- Exclude reviewed no-station edge cases from the current publication denominator when the plant record is nonphysical, unsited, unlocatable, or otherwise not usable for automated station assignment.
+- Publish the exclusions table beside the release dataset so denominator choices are explicit.
+
 ## Standards Basis
 
 The calculation follows the EOP-012 concept of ECWT as the 0.2 percentile of hourly dry-bulb temperatures measured in December, January, and February from 2000-01-01 through the calculation date.
+
+The compliance-facing evidence record for each accepted ECWT should identify:
+
+- the calculation date
+- source temperature data and station identifiers
+- any source substitutions or adjustments used for missing or invalid hourly temperature data
+- coverage evidence showing valid, missing, duplicate, invalid, and rejected observations
+- the methodology and code version used for the calculation
+- the published release manifest tying output files to checksums and run IDs
 
 The EPRI guidance reviewed for this project emphasizes three operational points:
 
 - Generator owners select the representative weather source.
 - Nearby stations are usually preferred, but topography, water bodies, and local observations can justify a different station.
 - Missing, duplicate, and excessive-frequency observations must be identified and handled as part of the evidence record.
+
+This project treats the automated station selection as evidence for review, not as a substitute for Generator Owner judgment. A plant owner may choose a different representative station if it documents why that station is more representative.
 
 ## Asset Universe
 
@@ -121,6 +141,12 @@ Every segment must be recorded with:
 
 No silent station substitution is allowed.
 
+Automated publication readiness is separate from station selection:
+
+- Station selection ranks the candidate weather stations using plant location, station metadata, distance, and representativeness evidence.
+- Publication readiness evaluates whether the selected station or documented composite series has enough valid DJF hourly data to support publication.
+- A low-coverage primary station does not authorize station shopping. It either remains blocked, receives documented missing-hour treatment, or is escalated for manual review.
+
 ## Missing And Excess Data
 
 For each selected station or station segment, calculate:
@@ -145,6 +171,13 @@ The project should publish both the ECWT result and the coverage evidence used t
 
 Publication-readiness coverage ratios should use a fixed selected-station active-period DJF denominator for the ECWT calculation window. They should not use only station-years that happen to have been loaded already, because that denominator grows during backfill and can make readiness counts move for bookkeeping reasons rather than real coverage gains.
 
+The current national policy result uses a normalized active-window loaded-year gate:
+
+- The denominator is the selected station active-window DJF period intersected with the ECWT calculation window.
+- Only loaded station-years are credited in the loaded-year component of the gate.
+- Rows are publication-ready when coverage meets or exceeds the configured threshold, currently 0.95, or when an explicitly documented secondary-station fill makes the composite series meet the threshold.
+- Blocked rows preserve the reason code, including no station candidates and normalized active-window coverage below threshold.
+
 ## Secondary Station Fill For Missing Primary Hours
 
 EOP-012-3 requires the calculation record to identify the ECWT calculation date, the source or sources of temperature data, and any adjustments used for missing or invalid hourly temperature data. The EPRI ECWT guidance also allows missing data from the most representative station to be supplemented from the next most representative station, provided the owner documents the station choice and missing-data treatment.
@@ -159,6 +192,8 @@ This project therefore allows a secondary weather station fill only under a docu
 6. The output must record primary station ID, fallback station ID, primary valid hours, fallback-filled hours, composite valid hours, expected hours, coverage before and after fill, ECWT before and after fill, and the reason for the fill.
 
 This is an adjustment for missing or invalid data, not station shopping. A farther or colder station cannot be substituted merely to change the ECWT. If no documented fallback station resolves the missing-hour problem, the plant remains blocked or requires manual review.
+
+For automated publication, secondary fill is limited to plants that already have a selected primary station and fail only because of missing valid primary-station hours. It is not used for no-station plants, Alaska exclusions, missing plant coordinates, or unresolved siting problems.
 
 ## ECWT Calculation
 
@@ -192,6 +227,22 @@ EOP-012 requires recalculation at least every five years, and the cold-weather d
 
 - `calculated_ecwt_f` for a specific run
 - `governing_ecwt_f` as the lowest accepted ECWT across accepted runs for that plant/unit
+
+The plant-level dataset publishes the calculated ECWT for the current release. A later unit-level compliance layer should store the lowest accepted ECWT for each applicable generating unit and link each accepted calculation to the source release manifest.
+
+## Release Manifests
+
+Every public release should include a release manifest in both file and database form. The manifest should record:
+
+- release ID and release name
+- release generation timestamp
+- calculation run IDs used for weather inventory, backfill manifest, NOAA DJF loads, coverage, station ECWT, plant ECWT, readiness, policy result, secondary fill, and scoped export
+- Git commit used by the calculation run and Git commit that publishes the release artifacts
+- row counts for the dataset and exclusions table
+- SHA-256 checksum and byte size for each published artifact
+- notes describing scope decisions, exclusions, and known limitations
+
+The manifest is the audit bridge between GitHub and the local/Postgres build. GitHub should hold the code, methodology, reports, manifests, checksums, and compact publication files. Heavy NOAA raw data and database clusters should stay in the configured external data root.
 
 ## Exceptions
 
