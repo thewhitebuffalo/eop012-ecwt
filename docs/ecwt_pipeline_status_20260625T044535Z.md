@@ -48,7 +48,7 @@ The current AWS backfill queue is therefore exhausted under the active ECWT-targ
 
 The next useful work is no longer bulk AWS download. It is station-selection and coverage-policy work:
 
-1. Review whether the fixed `2000-2025`, 95% coverage, 20-loaded-year gate is the intended publication gate for every plant class.
+1. Decide the publication denominator policy: full fixed `2000-2025` DJF hours versus station-active-window DJF hours, and define how active-window metadata must be normalized before it can drive readiness.
 2. Prioritize the 15,923 fixed-coverage blockers by best available coverage, distance, NERC region, and plant criticality.
 3. Resolve the 28 no-candidate plants by fixing missing plant coordinates or excluding placeholder/unsited plant records from the publication universe.
 4. Decide how to publish the 144 first-operable current publication candidates: as preview candidates, not final compliance output, until station-selection review is complete.
@@ -74,6 +74,24 @@ The fixed-coverage blockers are summarized in
 `fixed_coverage_threshold_diagnostic_20260625T044535Z.md`. No blocked plant has
 best-candidate fixed-period coverage above 94%, so small coverage-threshold
 relaxations do not materially change readiness.
+
+The first-operable denominator diagnostic is
+`fixed_period_denominator_diagnostic_first-operable_20260625T052146Z_report.md`,
+with detail rows in
+`fixed_period_denominator_diagnostic_first-operable_20260625T052146Z.csv`. It
+shows that all 13,226 first-operable blockers are fixed-period coverage
+blockers under the current full-period gate: 13,219 fail only the fixed-period
+coverage threshold and 7 fail both fixed-period coverage and the loaded-year
+threshold.
+
+The same diagnostic shows that station-active-window denominators would make
+10,968 of those first-operable blockers pass an active-window coverage plus
+active-loaded-year-ratio screen. That is not yet a recommendation to switch the
+gate: 2,794 best active-window candidates have more valid loaded DJF hours than
+their station metadata active window expects, including 36 with active-window
+coverage ratios above 1.05 and a maximum ratio of 8.0. Those overfilled rows
+show that station active-window metadata needs a normalization rule before it
+can safely become the publication denominator.
 
 ## Guardrail Added
 
