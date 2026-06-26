@@ -620,6 +620,39 @@ create temp table stg_hourly_djf (
 """,
             copy_command("stg_hourly_djf", hourly_cols, staging_dir / "hourly_djf.csv"),
             """
+create temp table stg_hourly_rebuild_audit as
+select
+    staged.station_id,
+    staged.hour_ending_utc,
+    existing.station_id is null as needs_insert,
+    existing.station_id is not null
+      and existing.hour_local is distinct from staged.hour_local as needs_hour_local_update,
+    existing.station_id is not null
+      and (
+          existing.dry_bulb_c is distinct from staged.dry_bulb_c
+          or existing.dry_bulb_f is distinct from staged.dry_bulb_f
+      ) as payload_differs,
+    existing.station_id is not null
+      and (
+          existing.source_file_id is distinct from staged.source_file_id
+          or existing.quality_flags is distinct from array_remove(string_to_array(staged.quality_flags_text, '|'), '')
+      ) as metadata_differs
+from stg_hourly_djf staged
+left join weather.hourly_djf existing
+  on existing.station_id = staged.station_id
+ and existing.hour_ending_utc = staged.hour_ending_utc;
+""",
+            f"""
+update audit.calculation_run
+set parameters_json = parameters_json || jsonb_build_object(
+    'hourly_needs_insert_count', (select count(*) from stg_hourly_rebuild_audit where needs_insert),
+    'hourly_needs_hour_local_update_count', (select count(*) from stg_hourly_rebuild_audit where needs_hour_local_update),
+    'hourly_existing_payload_diff_count', (select count(*) from stg_hourly_rebuild_audit where payload_differs),
+    'hourly_existing_metadata_diff_count', (select count(*) from stg_hourly_rebuild_audit where metadata_differs)
+)
+where calculation_run_id = {sql_literal(run_id)};
+""",
+            """
 insert into weather.hourly_djf (
     station_id,
     hour_ending_utc,
@@ -631,22 +664,37 @@ insert into weather.hourly_djf (
     calculation_run_id
 )
 select
-    station_id,
-    hour_ending_utc,
-    hour_local,
-    dry_bulb_c,
-    dry_bulb_f,
-    source_file_id,
-    array_remove(string_to_array(quality_flags_text, '|'), ''),
-    calculation_run_id
-from stg_hourly_djf
-on conflict (station_id, hour_ending_utc) do update set
-    hour_local = excluded.hour_local,
-    dry_bulb_c = excluded.dry_bulb_c,
-    dry_bulb_f = excluded.dry_bulb_f,
-    source_file_id = excluded.source_file_id,
-    quality_flags = excluded.quality_flags,
-    calculation_run_id = excluded.calculation_run_id;
+    staged.station_id,
+    staged.hour_ending_utc,
+    staged.hour_local,
+    staged.dry_bulb_c,
+    staged.dry_bulb_f,
+    staged.source_file_id,
+    array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
+    staged.calculation_run_id
+from stg_hourly_djf staged
+join stg_hourly_rebuild_audit audit
+  on audit.station_id = staged.station_id
+ and audit.hour_ending_utc = staged.hour_ending_utc
+where audit.needs_insert
+on conflict (station_id, hour_ending_utc) do nothing;
+""",
+            """
+update weather.hourly_djf existing
+set
+    hour_local = staged.hour_local,
+    dry_bulb_c = staged.dry_bulb_c,
+    dry_bulb_f = staged.dry_bulb_f,
+    source_file_id = staged.source_file_id,
+    quality_flags = array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
+    calculation_run_id = staged.calculation_run_id
+from stg_hourly_djf staged
+join stg_hourly_rebuild_audit audit
+  on audit.station_id = staged.station_id
+ and audit.hour_ending_utc = staged.hour_ending_utc
+where existing.station_id = staged.station_id
+  and existing.hour_ending_utc = staged.hour_ending_utc
+  and audit.payload_differs;
 """,
             """
 create temp table stg_noaa_hourly_load_file (
@@ -744,7 +792,7 @@ on conflict (station_id, source_year, local_path) do update set
     error_message = excluded.error_message,
     notes = excluded.notes;
 """,
-            """
+            "" if params.get("skip_summary_refresh") else """
 create temp table stg_touched_station_year as
 select distinct
     station_id,
@@ -756,7 +804,7 @@ select distinct station_id, source_year
 from stg_noaa_hourly_load_file
 where file_status = 'loaded';
 """,
-            """
+            "" if params.get("skip_summary_refresh") else """
 insert into weather.station_year_hourly_summary (
     station_id,
     source_year,
@@ -775,10 +823,32 @@ select
     now() as refreshed_at_utc,
     'weather.hourly_djf canonical station-local DJF rows refreshed by load_noaa_hourly_djf.py' as source_basis
 from stg_touched_station_year touched
+join weather.station station
+  on station.station_id = touched.station_id
 left join weather.hourly_djf hourly
   on hourly.station_id = touched.station_id
- and extract(year from coalesce(hourly.hour_local, hourly.hour_ending_utc at time zone 'UTC'))::integer = touched.source_year
- and extract(month from coalesce(hourly.hour_local, hourly.hour_ending_utc at time zone 'UTC')) in (12, 1, 2)
+ and (
+      (
+          hourly.hour_ending_utc >= (
+              make_timestamp(touched.source_year, 1, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+          and hourly.hour_ending_utc < (
+              make_timestamp(touched.source_year, 3, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+      )
+      or (
+          hourly.hour_ending_utc >= (
+              make_timestamp(touched.source_year, 12, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+          and hourly.hour_ending_utc < (
+              make_timestamp(touched.source_year + 1, 1, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+      )
+ )
 group by touched.station_id, touched.source_year
 on conflict (station_id, source_year) do update set
     valid_djf_hours = excluded.valid_djf_hours,
@@ -982,6 +1052,11 @@ def main() -> int:
         action="store_true",
         help="Run expensive exact weather.hourly_djf count(*) validations in the report.",
     )
+    parser.add_argument(
+        "--skip-summary-refresh",
+        action="store_true",
+        help="Defer weather.station_year_hourly_summary refresh; useful for bulk reloads that run a full summary backfill afterward.",
+    )
     args = parser.parse_args()
 
     if not args.psql.exists():
@@ -994,7 +1069,7 @@ def main() -> int:
     target_station_years = read_target_station_years(args.station_year_csv, args.station_year_gap_cause)
 
     code_commit = git_commit_label(args.project_root)
-    run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
+    run_timestamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
     run_id = f"noaa_hourly_djf_load_{run_timestamp}"
     staging_dir = args.staging_root / run_id
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -1065,6 +1140,7 @@ def main() -> int:
         "max_temp_c": args.max_temp_c,
         "file_count": len(file_rows),
         "hourly_rows_staged": len(hourly_rows),
+        "skip_summary_refresh": args.skip_summary_refresh,
         "tmp_units": "NOAA TMP tenths of degrees C converted to C and F",
         "timestamp_policy": (
             "DJF month filtering uses station-local standard time derived from weather.station.local_standard_utc_offset_hours; "

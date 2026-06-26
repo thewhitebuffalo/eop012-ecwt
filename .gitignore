@@ -10,6 +10,7 @@
 __pycache__/
 data/raw/
 data/processed/*
+data/rebuild_chunks/
 db/
 
 # Generated run products. Keep release bundles outside repo history and publish

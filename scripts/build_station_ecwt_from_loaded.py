@@ -211,6 +211,18 @@ with coverage as (
     where calculation_run_id = {sql_literal(coverage_run_id)}
     group by station_id
 ),
+localized_hourly as (
+    select
+        hourly.station_id,
+        hourly.hour_ending_utc,
+        hourly.dry_bulb_c,
+        hourly.dry_bulb_f,
+        (hourly.hour_ending_utc at time zone 'UTC')
+            + make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0)) as hour_local_computed
+    from weather.hourly_djf hourly
+    join weather.station station
+      on station.station_id = hourly.station_id
+),
 stats as (
     select
         station_id,
@@ -219,8 +231,8 @@ stats as (
         percentile_cont({percentile_target}) within group (order by dry_bulb_c) as ecwt_c,
         percentile_cont({percentile_target}) within group (order by dry_bulb_f) as ecwt_f,
         greatest(ceil({percentile_target} * count(*))::integer, 1) as discrete_rank
-    from weather.hourly_djf
-    where extract(month from coalesce(hour_local, hour_ending_utc at time zone 'UTC')) in (12, 1, 2)
+    from localized_hourly
+    where extract(month from hour_local_computed) in (12, 1, 2)
     group by station_id
 ),
 ranked as (
@@ -229,8 +241,8 @@ ranked as (
         dry_bulb_c,
         dry_bulb_f,
         row_number() over (partition by station_id order by dry_bulb_c, hour_ending_utc) as cold_rank
-    from weather.hourly_djf
-    where extract(month from coalesce(hour_local, hour_ending_utc at time zone 'UTC')) in (12, 1, 2)
+    from localized_hourly
+    where extract(month from hour_local_computed) in (12, 1, 2)
 ),
 discrete as (
     select

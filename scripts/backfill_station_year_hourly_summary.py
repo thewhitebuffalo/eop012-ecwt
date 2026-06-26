@@ -161,17 +161,26 @@ insert into weather.station_year_hourly_summary (
     source_basis
 )
 select
-    station_id,
-    extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer as source_year,
+    localized.station_id,
+    extract(year from localized.hour_local_computed)::integer as source_year,
     count(*)::bigint as valid_djf_hours,
-    min(hour_ending_utc) as min_hour_ending_utc,
-    max(hour_ending_utc) as max_hour_ending_utc,
+    min(localized.hour_ending_utc) as min_hour_ending_utc,
+    max(localized.hour_ending_utc) as max_hour_ending_utc,
     now() as refreshed_at_utc,
-    'weather.hourly_djf station-local DJF full-table backfill by backfill_station_year_hourly_summary.py' as source_basis
-from weather.hourly_djf
-where extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer between {min_year} and {max_year}
-  and extract(month from coalesce(hour_local, hour_ending_utc at time zone 'UTC')) in (12, 1, 2)
-group by station_id, extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer
+    'weather.hourly_djf station-local DJF full-table backfill using station standard UTC offsets by backfill_station_year_hourly_summary.py' as source_basis
+from (
+    select
+        hourly.station_id,
+        hourly.hour_ending_utc,
+        (hourly.hour_ending_utc at time zone 'UTC')
+            + make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0)) as hour_local_computed
+    from weather.hourly_djf hourly
+    join weather.station station
+      on station.station_id = hourly.station_id
+) localized
+where extract(year from localized.hour_local_computed)::integer between {min_year} and {max_year}
+  and extract(month from localized.hour_local_computed) in (12, 1, 2)
+group by localized.station_id, extract(year from localized.hour_local_computed)::integer
 on conflict (station_id, source_year) do update set
     valid_djf_hours = excluded.valid_djf_hours,
     min_hour_ending_utc = excluded.min_hour_ending_utc,

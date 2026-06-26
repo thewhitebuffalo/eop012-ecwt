@@ -189,7 +189,7 @@ def existing_candidate_row(row: dict[str, str], scenario_id: str, scenario: dict
         "selected_station_name": row["selected_station_name"],
         "selected_station_state": row["selected_station_state"],
         "selected_station_country": row["selected_station_country"],
-        "selected_station_distance_km": "",
+        "selected_station_distance_km": row.get("selected_station_distance_km", ""),
         "selected_station_rank_order": "",
         "ecwt_f": row["ecwt_f"],
         "valid_hour_count": row["valid_hour_count"],

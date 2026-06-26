@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import export_scoped_plant_ecwt_dataset as scoped_export  # noqa: E402
+import build_readiness_policy_scenarios as policy_scenarios  # noqa: E402
 import materialize_policy_ecwt_results as policy_results  # noqa: E402
 
 
@@ -52,6 +53,37 @@ class PolicyMaterializationGuardTests(unittest.TestCase):
 
         self.assertEqual(result["readiness_status"], policy_results.DIAGNOSTIC_CANDIDATE_STATUS)
         self.assertEqual(result["reason_code"], "passes_diagnostic_active_window_policy_only")
+
+
+class PolicyScenarioGuardTests(unittest.TestCase):
+    def test_existing_fixed_candidate_preserves_station_distance(self) -> None:
+        row = {
+            "plant_id": "plant:1",
+            "eia_plant_code": "1",
+            "plant_name": "Plant",
+            "plant_state": "TX",
+            "plant_county": "County",
+            "sector_name": "Electric Utility",
+            "first_scope_generator_count": "1",
+            "first_scope_nameplate_mw": "100",
+            "selected_station_id": "station:1",
+            "selected_station_name": "Station",
+            "selected_station_state": "TX",
+            "selected_station_country": "US",
+            "selected_station_distance_km": "24.75",
+            "ecwt_f": "-12.3",
+            "valid_hour_count": "54000",
+            "expected_hour_count": "56000",
+            "coverage_ratio": "0.964286",
+        }
+
+        result = policy_scenarios.existing_candidate_row(
+            row,
+            "fixed_period_current_gate",
+            policy_scenarios.SCENARIOS["fixed_period_current_gate"],
+        )
+
+        self.assertEqual(result["selected_station_distance_km"], "24.75")
 
 
 class ScopedExportGuardTests(unittest.TestCase):

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import subprocess
 from collections import Counter, OrderedDict
@@ -107,6 +108,21 @@ def psql_cmd(psql: Path, host: str, port: int, dbname: str, user: str | None) ->
 def psql_scalar(psql: Path, host: str, port: int, dbname: str, user: str | None, query: str) -> str:
     result = run(psql_cmd(psql, host, port, dbname, user) + ["-At", "-c", query])
     return result.stdout.strip()
+
+
+def psql_csv_query(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    query: str,
+) -> list[dict[str, str]]:
+    result = run(
+        psql_cmd(psql, host, port, dbname, user)
+        + ["-c", f"\\copy ({query}) to stdout with (format csv, header true)"]
+    )
+    return list(csv.DictReader(io.StringIO(result.stdout)))
 
 
 def git_commit_label(project_root: Path) -> str:
@@ -349,6 +365,122 @@ def build_result_rows(
     )
     result_rows.sort(key=lambda row: (str(row.get("plant_state", "")), int(str(row.get("eia_plant_code") or "999999999")), str(row.get("plant_name", ""))))
     return result_rows
+
+
+def readiness_blocker_result_rows(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    run_id: str,
+    plant_scope: str,
+    policy_id: str,
+    scenario_run_id: str,
+    denominator_run_id: str,
+    readiness_run_id: str,
+    represented_plant_ids: set[str],
+) -> list[dict[str, object]]:
+    if not readiness_run_id:
+        return []
+    rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        with first_scope as (
+            select
+                ('eia860:2024:plant:' || eia_plant_code)::text as plant_id,
+                count(*)::bigint as first_scope_generator_count,
+                coalesce(sum(nameplate_capacity_mw), 0)::numeric as first_scope_nameplate_mw
+            from asset.generator
+            where status in ('OP','SB','OA','OS')
+            group by ('eia860:2024:plant:' || eia_plant_code)::text
+        )
+        select
+            p.plant_id,
+            p.eia_plant_code,
+            p.plant_name,
+            p.state as plant_state,
+            p.county as plant_county,
+            p.sector_name,
+            coalesce(fs.first_scope_generator_count, 0)::text as first_scope_generator_count,
+            coalesce(fs.first_scope_nameplate_mw, 0)::text as first_scope_nameplate_mw,
+            r.selected_station_id,
+            st.station_name as selected_station_name,
+            st.state as selected_station_state,
+            st.country as selected_station_country,
+            r.selected_station_distance_km::text as selected_station_distance_km,
+            pe.ecwt_f::text as ecwt_f,
+            r.valid_hour_count::text as valid_hour_count,
+            r.expected_hour_count::text as expected_hour_count,
+            r.coverage_ratio::text as coverage_ratio,
+            r.reason_code,
+            r.notes
+        from calc.plant_ecwt_readiness r
+        join calc.plant_ecwt pe
+          on pe.plant_ecwt_id = r.plant_ecwt_id
+        join asset.plant p
+          on p.plant_id = r.plant_id
+        left join first_scope fs
+          on fs.plant_id = p.plant_id
+        left join weather.station st
+          on st.station_id = r.selected_station_id
+        where r.calculation_run_id = {sql_literal(readiness_run_id)}
+          and r.readiness_status = 'blocked'
+        """,
+    )
+    result: list[dict[str, object]] = []
+    for row in rows:
+        plant_id = row.get("plant_id", "")
+        if plant_id in represented_plant_ids:
+            continue
+        result.append(
+            {
+                "policy_result_run_id": run_id,
+                "plant_scope": plant_scope,
+                "policy_id": policy_id,
+                "policy_label": POLICY_LABELS.get(policy_id, policy_id),
+                "policy_suitability": (
+                    "current_conservative_gate"
+                    if policy_id == "fixed_period_current_gate"
+                    else "diagnostic_policy_option"
+                ),
+                "source_scenario_run_id": scenario_run_id,
+                "source_denominator_run_id": denominator_run_id,
+                "plant_id": plant_id,
+                "eia_plant_code": row.get("eia_plant_code", ""),
+                "plant_name": row.get("plant_name", ""),
+                "plant_state": row.get("plant_state", ""),
+                "plant_county": row.get("plant_county", ""),
+                "sector_name": row.get("sector_name", ""),
+                "first_scope_generator_count": row.get("first_scope_generator_count", ""),
+                "first_scope_nameplate_mw": row.get("first_scope_nameplate_mw", ""),
+                "readiness_status": "blocked",
+                "reason_code": row.get("reason_code", "readiness_gate_blocked"),
+                "candidate_source": "fixed_period_readiness_blocker",
+                "selected_station_id": row.get("selected_station_id", ""),
+                "selected_station_name": row.get("selected_station_name", ""),
+                "selected_station_state": row.get("selected_station_state", ""),
+                "selected_station_country": row.get("selected_station_country", ""),
+                "selected_station_distance_km": row.get("selected_station_distance_km", ""),
+                "selected_station_rank_order": "",
+                "ecwt_f": row.get("ecwt_f", ""),
+                "valid_hour_count": row.get("valid_hour_count", ""),
+                "expected_hour_count": row.get("expected_hour_count", ""),
+                "coverage_ratio": row.get("coverage_ratio", ""),
+                "overfilled_hour_count": "0",
+                "fixed_coverage_ratio": row.get("coverage_ratio", ""),
+                "fixed_loaded_station_year_count": "",
+                "source_blocker_class": row.get("reason_code", "readiness_gate_blocked"),
+                "source_active_window_class": "",
+                "source_normalized_active_window_class": "",
+                "notes": row.get("notes", "Blocked by fixed-period readiness gate."),
+            }
+        )
+    return result
 
 
 def qident(name: str) -> str:
@@ -720,6 +852,10 @@ def main() -> None:
     parser.add_argument("--policy-id", default=DEFAULT_POLICY_ID)
     parser.add_argument("--scenario-candidates-csv", type=Path)
     parser.add_argument("--denominator-csv", type=Path)
+    parser.add_argument(
+        "--readiness-run-id",
+        help="Optional fixed-period readiness run used to preserve readiness-gate blocked rows not present in the denominator diagnostic.",
+    )
     args = parser.parse_args()
 
     started_at = utc_now().isoformat()
@@ -735,6 +871,7 @@ def main() -> None:
     denominator_run_id = run_id_from_name(denominator_csv, ".csv")
     scenario_rows = read_csv(scenario_csv)
     denominator_rows = read_csv(denominator_csv)
+    readiness_run_id = args.readiness_run_id or ""
 
     run_id = f"plant_ecwt_policy_result_{scope_slug}_{args.policy_id}_{utc_now().strftime('%Y%m%dT%H%M%SZ')}"
     result_rows = build_result_rows(
@@ -745,6 +882,29 @@ def main() -> None:
         denominator_rows,
         scenario_run_id,
         denominator_run_id,
+    )
+    represented_ids = {str(row.get("plant_id", "")) for row in result_rows}
+    extra_readiness_blockers = readiness_blocker_result_rows(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        run_id,
+        args.plant_scope,
+        args.policy_id,
+        scenario_run_id,
+        denominator_run_id,
+        readiness_run_id,
+        represented_ids,
+    )
+    result_rows.extend(extra_readiness_blockers)
+    result_rows.sort(
+        key=lambda row: (
+            str(row.get("plant_state", "")),
+            int(str(row.get("eia_plant_code") or "999999999")),
+            str(row.get("plant_name", "")),
+        )
     )
     expected_scope_count = psql_scalar(
         args.psql,
@@ -776,6 +936,8 @@ def main() -> None:
         "policy_id": args.policy_id,
         "scenario_candidates_csv": str(scenario_csv),
         "denominator_csv": str(denominator_csv),
+        "readiness_run_id": readiness_run_id,
+        "extra_readiness_blocker_rows": len(extra_readiness_blockers),
         "result_csv": str(result_csv),
         "scenario_sha256": scenario_source["sha256"],
         "denominator_sha256": denominator_source["sha256"],
