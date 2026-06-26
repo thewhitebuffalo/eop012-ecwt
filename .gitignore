@@ -12,3 +12,6 @@ data/raw/
 data/processed/*
 !data/processed/scoped_plant_ecwt_release_*.csv
 db/
+
+# Generated visualization output (publish via Pages/Release, not git)
+build/
