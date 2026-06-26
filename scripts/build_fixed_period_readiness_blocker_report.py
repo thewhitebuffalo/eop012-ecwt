@@ -274,7 +274,7 @@ candidate_eval as (
         se.station_ecwt_id is not null as has_station_ecwt_row,
         se.result_status as station_ecwt_status,
         se.valid_hour_count as station_ecwt_valid_hour_count,
-        round(se.ecwt_f, 3)::text as station_ecwt_f,
+        round(se.ecwt_f, 1)::text as station_ecwt_f,
         sf.fixed_expected_djf_hours,
         sf.fixed_valid_djf_hours,
         sf.fixed_missing_djf_hours,

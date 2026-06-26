@@ -81,6 +81,19 @@ Weather data must preserve:
 
 The canonical calculation temperature is Fahrenheit for publication, with Celsius retained when it is the source or intermediate value.
 
+## NOAA Source Quality Policy
+
+NOAA Global Hourly rows are not all equivalent evidence. The canonical loader applies this source-quality policy before an observation can contribute to ECWT:
+
+- `TMP` is parsed as tenths of degrees C. Sentinel values `+9999`, `-9999`, and `9999`, malformed `TMP` values, and TMP quality code `9` are invalid.
+- NOAA `SOURCE=7` rows are rejected by default before temperature parsing.
+- Other SOURCE codes are retained unless explicitly configured as reject codes for a run; accepted duplicate station-hour observations are ranked with SOURCE `4` ahead of SOURCE `6`, and SOURCE `7` last if it has not been rejected by configuration.
+- When multiple accepted observations fall in the same canonical station-hour, the retained row is chosen by TMP quality rank (`1`, then `5`, then `0`, then other codes), FM report-type preference, SOURCE rank, and minute closest to 56.
+- Parsed dry-bulb temperatures outside the configured plausibility window are rejected. The current publication QA window is -65 C to 40 C, with an additional SHEF-specific floor of -50 C.
+- Rejected source rows, invalid TMP rows, plausibility rejects, duplicate observations, and valid loaded hours are retained as load-file and coverage evidence.
+
+The publication QA report must disclose the exact reject-source-code set used for the run and reconcile plausibility rejects against load-file counters before release.
+
 ## Time Window
 
 Include only observations that meet all of these conditions:
@@ -91,7 +104,15 @@ Include only observations that meet all of these conditions:
 - timestamp is within the calculation period beginning 2000-01-01
 - timestamp is on or before the calculation cutoff
 
-The timestamp basis must be explicit. If the source timestamp is UTC, the calculation layer must define whether meteorological winter month filtering is performed in station-local time or UTC. The preferred approach is station-local time for month/day/hour coverage audits, with UTC retained as the canonical timestamp.
+Timestamp basis:
+
+- Meteorological winter filtering is performed in station-local standard time.
+- UTC is retained as the canonical storage, lineage, and de-duplication timestamp.
+- `hour_local` stores the station-local hour used for DJF classification.
+- `weather.station.local_standard_utc_offset_hours` records the local standard-time offset used by the loader and coverage builders.
+- The current implementation derives that offset from station longitude as `round(longitude / 15)`, clamped to `[-12, 14]`. This is a deterministic standard-time approximation, not an IANA time-zone polygon lookup.
+
+This decision is recorded in `docs/adr/0001-station-local-djf-time-basis.md`. Publication runs after this decision must use a methodology version that distinguishes them from earlier UTC-filtered runs.
 
 ## Station Candidate Generation
 
@@ -147,6 +168,16 @@ Automated publication readiness is separate from station selection:
 - Publication readiness evaluates whether the selected station or documented composite series has enough valid DJF hourly data to support publication.
 - A low-coverage primary station does not authorize station shopping. It either remains blocked, receives documented missing-hour treatment, or is escalated for manual review.
 
+Automated publication candidates must pass the gates in `docs/adr/0002-publication-readiness-and-representativeness-gates.md`:
+
+- fixed-period or fixed-composite DJF coverage ratio of at least 0.95
+- at least 30,000 valid DJF hours
+- selected station no more than 100 km from the plant
+- selected station elevation delta no more than 300 m when elevation delta is available
+- selected station metadata must not begin after 2000-01-01 for a single-station fixed-period candidate
+
+Rows outside those gates remain analytical/provisional until station review, station segmentation, or missing-hour treatment resolves the issue.
+
 ## Missing And Excess Data
 
 For each selected station or station segment, calculate:
@@ -169,14 +200,14 @@ Missing-data treatment must be explicit:
 
 The project should publish both the ECWT result and the coverage evidence used to judge that result.
 
-Publication-readiness coverage ratios should use a fixed selected-station active-period DJF denominator for the ECWT calculation window. They should not use only station-years that happen to have been loaded already, because that denominator grows during backfill and can make readiness counts move for bookkeeping reasons rather than real coverage gains.
+Publication-readiness coverage ratios use the fixed DJF calculation period beginning 2000-01-01 through the calculation cutoff. They must not use only station-years that happen to have been loaded already, because that denominator grows during backfill and can make readiness counts move for bookkeeping reasons rather than real coverage gains.
 
-The current national policy result uses a normalized active-window loaded-year gate:
+The current national publication gate is the fixed-period current gate:
 
-- The denominator is the selected station active-window DJF period intersected with the ECWT calculation window.
-- Only loaded station-years are credited in the loaded-year component of the gate.
-- Rows are publication-ready when coverage meets or exceeds the configured threshold, currently 0.95, or when an explicitly documented secondary-station fill makes the composite series meet the threshold.
-- Blocked rows preserve the reason code, including no station candidates and normalized active-window coverage below threshold.
+- The denominator is the full station-local DJF calculation period for the selected station or documented composite series.
+- Rows are publication-ready only when fixed-period coverage meets or exceeds the configured threshold, currently 0.95, and all other sufficiency and representativeness gates pass.
+- Normalized active-window loaded-year scenarios are retained as diagnostics only; they are not a publication gate.
+- Blocked rows preserve the reason code, including no station candidates, no provisional station ECWT, insufficient loaded station-years, and fixed-period coverage below threshold.
 
 ## Secondary Station Fill For Missing Primary Hours
 
@@ -220,6 +251,8 @@ The published table should include both:
 
 - `ecwt_f`: continuous percentile value
 - `ecwt_discrete_f`: temperature at the discrete audit rank
+
+Publication-facing CSV exports display ECWT values to 0.1 F because NOAA Global Hourly `TMP` source values are parsed from tenths of degrees C. Higher-precision numeric values may remain in database tables for reproducibility, but public previews and release CSVs must avoid implying false precision. This export policy is recorded in `docs/adr/0003-export-context-precision-and-source-quality.md`.
 
 ## Governing ECWT
 

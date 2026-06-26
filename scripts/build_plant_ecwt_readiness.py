@@ -14,7 +14,7 @@ from pathlib import Path
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 
 
 def utc_now() -> datetime:
@@ -104,6 +104,8 @@ def build_sql(
     coverage_min_year: int,
     coverage_max_year: int,
     coverage_denominator_mode: str,
+    max_station_distance_km: float,
+    max_elevation_delta_m: float,
 ) -> str:
     start = utc_now().isoformat(timespec="seconds")
     if coverage_denominator_mode == "plant-ecwt-row":
@@ -122,6 +124,9 @@ select
     pr.plant_ecwt_id,
     pr.plant_id,
     pr.selected_station_id,
+    pr.selected_station_distance_km,
+    pr.selected_station_elevation_delta_m,
+    pr.station_first_observation_utc,
     pr.valid_hour_count,
     case
         when pr.result_status = 'blocked' then 0::bigint
@@ -201,6 +206,9 @@ select
     pr.plant_ecwt_id,
     pr.plant_id,
     pr.selected_station_id,
+    pr.selected_station_distance_km,
+    pr.selected_station_elevation_delta_m,
+    pr.station_first_observation_utc,
     pr.valid_hour_count,
     case
         when pr.result_status = 'blocked' then 0::bigint
@@ -220,6 +228,8 @@ analyze tmp_readiness_source;
         "coverage_denominator_mode": coverage_denominator_mode,
         "coverage_min_year": coverage_min_year,
         "coverage_max_year": coverage_max_year,
+        "max_station_distance_km": max_station_distance_km,
+        "max_elevation_delta_m": max_elevation_delta_m,
         "readiness_rule": "publication_candidate requires provisional plant ECWT, valid hours >= threshold, fixed expected hours > 0, and coverage ratio >= threshold",
     }
     return f"""
@@ -237,11 +247,16 @@ create table if not exists calc.plant_ecwt_readiness (
     calculation_run_id text not null references audit.calculation_run(calculation_run_id),
     methodology_version text not null references audit.methodology_version(methodology_version),
     selected_station_id text references weather.station(station_id),
+    selected_station_distance_km numeric,
+    selected_station_elevation_delta_m numeric,
+    station_first_observation_utc timestamptz,
     valid_hour_count bigint not null,
     expected_hour_count bigint not null,
     coverage_ratio numeric,
     min_valid_hour_threshold bigint not null,
     min_coverage_ratio_threshold numeric not null,
+    max_station_distance_km_threshold numeric,
+    max_elevation_delta_m_threshold numeric,
     readiness_status text not null,
     reason_code text not null,
     notes text,
@@ -251,6 +266,16 @@ create table if not exists calc.plant_ecwt_readiness (
 );
 create index if not exists ix_plant_ecwt_readiness_run_status
     on calc.plant_ecwt_readiness (calculation_run_id, readiness_status);
+alter table calc.plant_ecwt_readiness
+    add column if not exists selected_station_distance_km numeric;
+alter table calc.plant_ecwt_readiness
+    add column if not exists selected_station_elevation_delta_m numeric;
+alter table calc.plant_ecwt_readiness
+    add column if not exists station_first_observation_utc timestamptz;
+alter table calc.plant_ecwt_readiness
+    add column if not exists max_station_distance_km_threshold numeric;
+alter table calc.plant_ecwt_readiness
+    add column if not exists max_elevation_delta_m_threshold numeric;
 create index if not exists ix_station_selection_segment_selection
     on link.station_selection_segment (station_selection_id);
 create index if not exists ix_plant_ecwt_run_selection
@@ -286,12 +311,23 @@ select
     pe.plant_ecwt_id,
     pe.plant_id,
     seg.station_id as selected_station_id,
+    sc.distance_km as selected_station_distance_km,
+    sc.elevation_delta_m as selected_station_elevation_delta_m,
+    st.first_observation_utc as station_first_observation_utc,
     pe.valid_hour_count,
     pe.expected_hour_count as loaded_expected_hour_count,
     pe.result_status
 from calc.plant_ecwt pe
+join audit.calculation_run pe_run
+  on pe_run.calculation_run_id = pe.calculation_run_id
 left join link.station_selection_segment seg
   on seg.station_selection_id = pe.station_selection_id
+left join link.station_candidate sc
+  on sc.calculation_run_id = pe_run.parameters_json ->> 'candidate_run_id'
+ and sc.plant_id = pe.plant_id
+ and sc.station_id = seg.station_id
+left join weather.station st
+  on st.station_id = seg.station_id
 where pe.calculation_run_id = {sql_literal(plant_ecwt_run_id)};
 create index tmp_readiness_plant_rows_station_idx
     on tmp_readiness_plant_rows (selected_station_id);
@@ -306,11 +342,16 @@ insert into calc.plant_ecwt_readiness (
     calculation_run_id,
     methodology_version,
     selected_station_id,
+    selected_station_distance_km,
+    selected_station_elevation_delta_m,
+    station_first_observation_utc,
     valid_hour_count,
     expected_hour_count,
     coverage_ratio,
     min_valid_hour_threshold,
     min_coverage_ratio_threshold,
+    max_station_distance_km_threshold,
+    max_elevation_delta_m_threshold,
     readiness_status,
     reason_code,
     notes
@@ -322,13 +363,25 @@ select
     {sql_literal(run_id)} as calculation_run_id,
     {sql_literal(METHODOLOGY_VERSION)} as methodology_version,
     rs.selected_station_id,
+    rs.selected_station_distance_km,
+    rs.selected_station_elevation_delta_m,
+    rs.station_first_observation_utc,
     rs.valid_hour_count,
     rs.expected_hour_count,
     (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) as coverage_ratio,
     {min_valid_hours}::bigint as min_valid_hour_threshold,
     {min_coverage_ratio}::numeric as min_coverage_ratio_threshold,
+    {max_station_distance_km}::numeric as max_station_distance_km_threshold,
+    {max_elevation_delta_m}::numeric as max_elevation_delta_m_threshold,
     case
         when rs.result_status = 'blocked' then 'blocked'
+        when rs.selected_station_id is null then 'blocked'
+        when rs.selected_station_distance_km is null then 'blocked'
+        when rs.selected_station_distance_km > {max_station_distance_km} then 'blocked'
+        when rs.selected_station_elevation_delta_m is not null
+         and abs(rs.selected_station_elevation_delta_m) > {max_elevation_delta_m} then 'blocked'
+        when rs.station_first_observation_utc is not null
+         and rs.station_first_observation_utc > make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC') then 'blocked'
         when rs.expected_hour_count = 0 then 'provisional_low_coverage'
         when rs.valid_hour_count >= {min_valid_hours}
          and (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) >= {min_coverage_ratio}
@@ -337,6 +390,13 @@ select
     end as readiness_status,
     case
         when rs.result_status = 'blocked' then {sql_literal(blocked_reason_code)}
+        when rs.selected_station_id is null then 'no_selected_station'
+        when rs.selected_station_distance_km is null then 'station_distance_unavailable'
+        when rs.selected_station_distance_km > {max_station_distance_km} then 'station_distance_exceeds_representativeness_gate'
+        when rs.selected_station_elevation_delta_m is not null
+         and abs(rs.selected_station_elevation_delta_m) > {max_elevation_delta_m} then 'station_elevation_delta_exceeds_representativeness_gate'
+        when rs.station_first_observation_utc is not null
+         and rs.station_first_observation_utc > make_timestamptz({coverage_min_year}, 1, 1, 0, 0, 0, 'UTC') then 'station_starts_after_fixed_period_start'
         when rs.expected_hour_count = 0 then 'expected_hours_unavailable'
         when rs.valid_hour_count < {min_valid_hours} then 'valid_hours_below_threshold'
         when (rs.valid_hour_count::numeric / nullif(rs.expected_hour_count, 0)) < {min_coverage_ratio} then 'coverage_ratio_below_threshold'
@@ -346,11 +406,16 @@ select
 from tmp_readiness_source rs
 on conflict (plant_ecwt_readiness_id) do update set
     selected_station_id = excluded.selected_station_id,
+    selected_station_distance_km = excluded.selected_station_distance_km,
+    selected_station_elevation_delta_m = excluded.selected_station_elevation_delta_m,
+    station_first_observation_utc = excluded.station_first_observation_utc,
     valid_hour_count = excluded.valid_hour_count,
     expected_hour_count = excluded.expected_hour_count,
     coverage_ratio = excluded.coverage_ratio,
     min_valid_hour_threshold = excluded.min_valid_hour_threshold,
     min_coverage_ratio_threshold = excluded.min_coverage_ratio_threshold,
+    max_station_distance_km_threshold = excluded.max_station_distance_km_threshold,
+    max_elevation_delta_m_threshold = excluded.max_elevation_delta_m_threshold,
     readiness_status = excluded.readiness_status,
     reason_code = excluded.reason_code,
     notes = excluded.notes;
@@ -386,6 +451,8 @@ def render_report(
     coverage_min_year: int,
     coverage_max_year: int,
     coverage_denominator_mode: str,
+    max_station_distance_km: float,
+    max_elevation_delta_m: float,
     db_counts: OrderedDict[str, str],
     by_reason: list[dict[str, str]],
     host: str,
@@ -411,6 +478,8 @@ def render_report(
         f"- Code commit: `{code_commit}`",
         f"- Minimum valid hours: `{min_valid_hours}`",
         f"- Minimum coverage ratio: `{min_coverage_ratio}`",
+        f"- Maximum selected-station distance km: `{max_station_distance_km}`",
+        f"- Maximum station elevation delta m: `{max_elevation_delta_m}`",
         f"- Coverage denominator mode: `{coverage_denominator_mode}`",
         f"- Coverage year range: `{coverage_min_year}-{coverage_max_year}`",
         "",
@@ -431,6 +500,7 @@ def render_report(
             "",
             "- This is a working publication-readiness gate for provisional plant ECWT rows.",
             "- Coverage ratios use the denominator mode recorded above, not only currently loaded station-year files.",
+            "- Publication candidates must also pass the selected-station distance, elevation-delta, and station-start representativeness gates.",
             "- For fixed-period plant selection runs, use `plant-ecwt-row` so readiness preserves the fixed-period valid/expected hours stored on `calc.plant_ecwt`.",
             "- `publication_candidate` is not the same as final accepted compliance output; it means the row passes the current coverage thresholds.",
             "- Rows that fail this gate should stay out of a published compliance dataset until more weather coverage or manual review is available.",
@@ -449,14 +519,16 @@ def main() -> int:
     parser.add_argument("--dbname", default="eop012")
     parser.add_argument("--user", default=None)
     parser.add_argument("--plant-ecwt-run-id", default=None)
-    parser.add_argument("--min-valid-hours", type=int, default=2000)
+    parser.add_argument("--min-valid-hours", type=int, default=30000)
     parser.add_argument("--min-coverage-ratio", type=float, default=0.95)
     parser.add_argument("--coverage-min-year", type=int, default=2000)
     parser.add_argument("--coverage-max-year", type=int, default=2025)
+    parser.add_argument("--max-station-distance-km", type=float, default=100.0)
+    parser.add_argument("--max-elevation-delta-m", type=float, default=300.0)
     parser.add_argument(
         "--coverage-denominator-mode",
         choices=["active-station-window", "plant-ecwt-row"],
-        default="active-station-window",
+        default="plant-ecwt-row",
     )
     args = parser.parse_args()
 
@@ -479,6 +551,8 @@ def main() -> int:
             args.coverage_min_year,
             args.coverage_max_year,
             args.coverage_denominator_mode,
+            args.max_station_distance_km,
+            args.max_elevation_delta_m,
         ),
     )
 
@@ -508,6 +582,8 @@ def main() -> int:
         args.coverage_min_year,
         args.coverage_max_year,
         args.coverage_denominator_mode,
+        args.max_station_distance_km,
+        args.max_elevation_delta_m,
         db_counts,
         by_reason,
         args.host,

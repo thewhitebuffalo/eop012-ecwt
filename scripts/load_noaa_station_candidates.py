@@ -25,7 +25,7 @@ DEFAULT_STATION_HISTORY_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-histo
 DEFAULT_STATION_HISTORY_CSV = STATION_HISTORY_CSV
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "noaa_isd_station_history"
 
 
@@ -128,6 +128,12 @@ def parse_float(value: str) -> float | None:
         return None
 
 
+def local_standard_utc_offset_hours(longitude: float | None) -> int | None:
+    if longitude is None:
+        return None
+    return max(-12, min(14, round(longitude / 15.0)))
+
+
 def station_id(usaf: str, wban: str) -> str | None:
     usaf = (usaf or "").strip()
     wban = (wban or "").strip()
@@ -162,6 +168,7 @@ def parse_noaa_station_history(path: Path, source_file_id: str) -> list[dict[str
                 "station_name": (row.get("STATION NAME", "") or "").strip() or None,
                 "latitude": lat,
                 "longitude": lon,
+                "local_standard_utc_offset_hours": local_standard_utc_offset_hours(lon),
                 "elevation_m": parse_float(row.get("ELEV(M)", "")),
                 "state": (row.get("STATE", "") or "").strip() or None,
                 "country": (row.get("CTRY", "") or "").strip() or None,
@@ -178,7 +185,15 @@ def parse_noaa_station_history(path: Path, source_file_id: str) -> list[dict[str
             old_end = existing.get("last_observation_utc") or ""
             new_end = incoming.get("last_observation_utc") or ""
             if new_end >= old_end:
-                for key in ["station_name", "latitude", "longitude", "elevation_m", "state", "country"]:
+                for key in [
+                    "station_name",
+                    "latitude",
+                    "longitude",
+                    "local_standard_utc_offset_hours",
+                    "elevation_m",
+                    "state",
+                    "country",
+                ]:
                     existing[key] = incoming[key]
             begins = [v for v in [existing.get("first_observation_utc"), incoming.get("first_observation_utc")] if v]
             ends = [v for v in [existing.get("last_observation_utc"), incoming.get("last_observation_utc")] if v]
@@ -352,6 +367,7 @@ def build_load_sql(
         "station_name",
         "latitude",
         "longitude",
+        "local_standard_utc_offset_hours",
         "elevation_m",
         "state",
         "country",
@@ -470,11 +486,16 @@ on conflict (calculation_run_id) do update set
     notes = excluded.notes;
 """,
             """
+alter table weather.station
+    add column if not exists local_standard_utc_offset_hours integer;
+""",
+            """
 create temp table stg_station (
     station_id text,
     station_name text,
     latitude numeric,
     longitude numeric,
+    local_standard_utc_offset_hours integer,
     elevation_m numeric,
     state text,
     country text,
@@ -490,6 +511,7 @@ insert into weather.station (
     station_name,
     latitude,
     longitude,
+    local_standard_utc_offset_hours,
     elevation_m,
     state,
     country,
@@ -502,6 +524,7 @@ select
     station_name,
     latitude,
     longitude,
+    local_standard_utc_offset_hours,
     elevation_m,
     state,
     country,
@@ -513,6 +536,7 @@ on conflict (station_id) do update set
     station_name = excluded.station_name,
     latitude = excluded.latitude,
     longitude = excluded.longitude,
+    local_standard_utc_offset_hours = excluded.local_standard_utc_offset_hours,
     elevation_m = excluded.elevation_m,
     state = excluded.state,
     country = excluded.country,

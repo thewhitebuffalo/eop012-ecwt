@@ -1,3 +1,0 @@
-priority_run_id,plant_state,plant_count,distinct_station_count,total_first_operable_nameplate_mw,min_normalized_coverage_ratio,median_normalized_coverage_ratio,max_normalized_coverage_ratio,total_valid_hour_gap_to_threshold,gap_le_24h_count,gap_le_168h_count,gap_le_720h_count,gap_le_2160h_count,gap_gt_2160h_count,top_station_ids
-normalized_active_window_blocker_priority_20260625T133017Z,AK,11,3,55.600,0.934586,0.938422,0.945151,2540,0,8,3,0,0,702460-99999:7;999999-26655:3;703430-99999:1
-normalized_active_window_blocker_priority_20260625T133017Z,TX,4,2,657.300,0.945034,0.945034,0.947263,231,0,4,0,0,0,723528-99999:3;722539-99999:1

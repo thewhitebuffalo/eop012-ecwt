@@ -20,7 +20,7 @@ from eop012_config import NOAA_GLOBAL_HOURLY_ROOT, PROJECT_ROOT, PSQL, STAGING_R
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 DEFAULT_TARGET_ROOT = NOAA_GLOBAL_HOURLY_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "noaa_global_hourly_backfill_manifest"
 DEFAULT_BASE_URL = "https://noaa-global-hourly-pds.s3.amazonaws.com"
 

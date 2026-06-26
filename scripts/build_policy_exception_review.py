@@ -18,7 +18,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 MIN_COVERAGE_RATIO = 0.95
 
 REVIEW_FIELDS = [

@@ -17,7 +17,7 @@ from typing import Iterable
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION_FALLBACK = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION_FALLBACK = "eop012-ecwt-method-v0.2.0"
 RELEASE_PREFIX = "scoped_plant_ecwt_release_"
 MANIFEST_RUN_PREFIX = "release_manifest_"
 

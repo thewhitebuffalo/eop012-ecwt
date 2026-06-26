@@ -16,7 +16,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 from load_noaa_hourly_djf import DJF_MONTHS, SHEF_MIN_TEMP_C, open_text, parse_noaa_datetime, parse_tmp
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 DEFAULT_MIN_TEMP_C = -65.0
 DEFAULT_MAX_TEMP_C = 40.0
 DEFAULT_REJECT_SOURCE_CODES = {"7"}
@@ -277,8 +277,8 @@ def warm_station_rows(
             se.expected_hour_count::text as expected_hour_count,
             se.missing_hour_count::text as missing_hour_count,
             se.duplicate_hour_count::text as duplicate_hour_count,
-            round(se.ecwt_f, 3)::text as ecwt_f,
-            round(se.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
+            round(se.ecwt_f, 1)::text as ecwt_f,
+            round(se.ecwt_discrete_f, 1)::text as ecwt_discrete_f,
             se.result_status,
             coalesce(selected.selected_plants, 0)::text as selected_plants,
             coalesce(selected.strict_publication_candidate_plants, 0)::text as strict_publication_candidate_plants
@@ -533,6 +533,14 @@ def render_report(
         f"- Plausibility temperature window C: `{min_temp_c}` to `{max_temp_c}`",
         f"- Rejected NOAA SOURCE codes before plausibility reconstruction: `{sorted(reject_source_codes)}`",
         f"- Plausibility reject detail CSV: `{rejects_csv_path.name}`",
+        "",
+        "## NOAA Source-Quality Policy",
+        "",
+        "- NOAA Global Hourly `TMP` is parsed as tenths of degrees C; sentinel values `+9999`, `-9999`, and `9999`, malformed values, and TMP quality code `9` are invalid.",
+        f"- Rows with NOAA `SOURCE` in `{sorted(reject_source_codes)}` are rejected before TMP parsing in the canonical loader.",
+        "- When multiple accepted observations land in the same station-hour, the loader keeps the best row by TMP quality rank (`1`, then `5`, then `0`), then FM report type preference, then SOURCE rank (`4`, then `6`, then other accepted codes), then minute closest to 56.",
+        f"- Parsed temperatures outside `{min_temp_c}` to `{max_temp_c}` C are rejected; SHEF rows below `{SHEF_MIN_TEMP_C}` C are also rejected.",
+        "- The QA report reconciles these policies against historical load-file counters and the canonical rows available to ECWT.",
         "",
         "## Plausibility Rejects",
         "",

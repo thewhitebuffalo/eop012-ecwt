@@ -18,7 +18,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "secondary_station_fill_ecwt"
 DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_"
 DEFAULT_CANDIDATE_PREFIX = "noaa_station_candidates_"

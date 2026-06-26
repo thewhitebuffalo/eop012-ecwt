@@ -17,7 +17,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 OPERABLE_STATUSES = ("OP", "SB", "OA", "OS")
 
 
@@ -290,7 +290,7 @@ def candidate_rows_query(
         se.station_ecwt_id,
         se.result_status as station_ecwt_status,
         coalesce(se.valid_hour_count, 0)::text as station_ecwt_valid_hour_count,
-        round(se.ecwt_f, 3)::text as station_ecwt_f
+        round(se.ecwt_f, 1)::text as station_ecwt_f
     from link.station_candidate sc
     join blocked_plants bp using (plant_id)
     join weather.station st using (station_id)

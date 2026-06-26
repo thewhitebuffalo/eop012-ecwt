@@ -16,7 +16,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_"
+DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_fixed_period_current_gate_"
 DEFAULT_SECONDARY_PREFIX = "secondary_station_fill_ecwt_"
 DEFAULT_STATION_ECWT_PREFIX = "station_ecwt_loaded_"
 
@@ -58,7 +58,11 @@ EXPORT_FIELDS = [
     "expected_hour_count",
     "missing_hour_count",
     "coverage_ratio",
+    "coverage_basis",
     "percentile_target",
+    "ecwt_precision_basis",
+    "selected_station_representativeness_basis",
+    "publication_caveat",
     "readiness_status",
     "reason_code",
     "notes",
@@ -218,13 +222,19 @@ def export_query(
             null::text as fallback_station_country,
             null::text as fallback_station_distance_km,
             null::text as fallback_station_rank_order,
-            round(pr.ecwt_f, 3)::text as ecwt_f,
-            round(se.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
+            round(pr.ecwt_f, 1)::text as ecwt_f,
+            round(se.ecwt_discrete_f, 1)::text as ecwt_discrete_f,
             pr.valid_hour_count::text as valid_hour_count,
             pr.expected_hour_count::text as expected_hour_count,
             greatest(pr.expected_hour_count - pr.valid_hour_count, 0)::text as missing_hour_count,
             round(pr.coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_2000_to_calculation_cutoff'::text as coverage_basis,
             '0.002'::text as percentile_target,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'automated_gate_distance_100km_elevation_300m_fixed_coverage_0.95'::text
+                as selected_station_representativeness_basis,
+            'Analytical plant-level ECWT output; not a Generator Owner EOP-012 compliance filing input without station representativeness review and source QA acceptance.'::text
+                as publication_caveat,
             pr.readiness_status,
             pr.reason_code,
             pr.notes
@@ -270,13 +280,19 @@ def export_query(
             sf.fallback_station_country,
             round(sf.fallback_station_distance_km, 3)::text as fallback_station_distance_km,
             sf.fallback_station_rank_order::text as fallback_station_rank_order,
-            round(sf.composite_ecwt_f, 3)::text as ecwt_f,
-            round(sf.composite_ecwt_discrete_f, 3)::text as ecwt_discrete_f,
+            round(sf.composite_ecwt_f, 1)::text as ecwt_f,
+            round(sf.composite_ecwt_discrete_f, 1)::text as ecwt_discrete_f,
             sf.composite_valid_hour_count::text as valid_hour_count,
             sf.generated_expected_hour_count::text as expected_hour_count,
             greatest(sf.generated_expected_hour_count - sf.composite_valid_hour_count, 0)::text as missing_hour_count,
             round(sf.composite_coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_composite_2000_to_calculation_cutoff'::text as coverage_basis,
             sf.percentile_target::text as percentile_target,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'documented_secondary_station_fill_with_primary_station_retained'::text
+                as selected_station_representativeness_basis,
+            'Analytical plant-level ECWT output; secondary-fill rows require review of station representativeness, missing-hour treatment, and source QA before compliance use.'::text
+                as publication_caveat,
             'publication_candidate'::text as readiness_status,
             'passes_secondary_station_fill'::text as reason_code,
             sf.notes
@@ -367,7 +383,9 @@ def render_report(
         "",
         "## Scope",
         "",
-        "This export includes non-Alaska plant rows that are publication-ready under the normalized active-window loaded-year policy, plus rows made publication-ready by the documented secondary-station fill method. It excludes Alaska and the reviewed no-station edge cases from the current publication denominator.",
+        "This export includes non-Alaska plant rows that are publication-ready under the fixed-period current gate, plus rows made publication-ready by the documented secondary-station fill method. It excludes Alaska and the reviewed no-station edge cases from the current publication denominator.",
+        "",
+        "ECWT values are rounded to 0.1 F because the NOAA Global Hourly TMP source field is stored in tenths of a degree C. Each exported row carries `coverage_basis`, `ecwt_precision_basis`, `selected_station_representativeness_basis`, and `publication_caveat` fields so downstream users see the audit caveats in the CSV itself.",
         "",
         "## Row Counts",
         "",

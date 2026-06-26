@@ -75,6 +75,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `country` | text | Country code. |
 | `first_observation_utc` | timestamptz | Earliest known observation. |
 | `last_observation_utc` | timestamptz | Latest known observation. |
+| `local_standard_utc_offset_hours` | integer | Station-local standard-time UTC offset used for DJF month classification. The current loader derives it from station longitude when an authoritative offset is not available. |
 
 ## `weather.hourly_djf`
 
@@ -82,11 +83,11 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | --- | --- | --- |
 | `station_id` | text | Canonical NOAA ISD station identifier. |
 | `hour_ending_utc` | timestamptz | Canonical UTC station-hour used for ECWT-oriented DJF weather analysis. Current loader policy floors the NOAA observation timestamp to the UTC hour. |
-| `hour_local` | timestamp | Reserved for local station-hour once timezone handling is added. |
+| `hour_local` | timestamp | Station-local standard-time hour used for DJF month classification. UTC remains canonical for storage and joins. |
 | `dry_bulb_c` | numeric | Dry-bulb temperature in degrees C parsed from NOAA Global Hourly `TMP`. |
 | `dry_bulb_f` | numeric | Dry-bulb temperature in degrees F. |
 | `source_file_id` | text | Source file lineage. Downloaded AWS files have per-file lineage; preexisting local-inventory files currently use the inventory source-root lineage. |
-| `quality_flags` | text[] | Loader-retained NOAA quality context, such as TMP quality code, report type, source code, and quality-control code. |
+| `quality_flags` | text[] | Loader-retained NOAA quality context, such as TMP quality code, report type, source code, quality-control code, and station-local offset. |
 | `calculation_run_id` | text | DJF load run that inserted or last updated the row. |
 
 ## `weather.noaa_hourly_load_file`
@@ -104,7 +105,7 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `file_size_bytes` | bigint | File size when available. |
 | `file_status` | text | `loaded`, `failed`, or `skipped`. |
 | `rows_seen` | bigint | Total CSV rows read. |
-| `djf_rows_seen` | bigint | Rows whose observation timestamp is in December, January, or February. |
+| `djf_rows_seen` | bigint | Rows whose station-local standard-time observation hour is in December, January, or February. |
 | `rejected_source_rows` | bigint | DJF rows rejected before TMP interpretation because their NOAA `SOURCE` code is excluded by the canonical loader. |
 | `valid_temp_rows` | bigint | DJF rows with a parseable non-missing `TMP` value accepted by the current loader. |
 | `invalid_temp_rows` | bigint | DJF rows with missing or rejected `TMP` values. |
@@ -122,12 +123,12 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | --- | --- | --- |
 | `station_year_djf_coverage_id` | text | Stable station-year coverage row identifier. |
 | `station_id` | text | NOAA ISD station ID in `USAF-WBAN` form. |
-| `source_year` | integer | NOAA Global Hourly source year. |
+| `source_year` | integer | Station-local DJF source year used by the coverage builder. |
 | `calculation_run_id` | text | Coverage-build run lineage. |
-| `period_start_utc` | timestamptz | Start of the source calendar year. |
-| `period_end_utc` | timestamptz | End of the source calendar year. |
-| `expected_djf_hours` | bigint | Expected UTC hours in January, February, and December for the source year. |
-| `valid_djf_hours` | bigint | Canonical loaded DJF hours available for the station-year. |
+| `period_start_utc` | timestamptz | UTC timestamp corresponding to the start of the station-local source year. |
+| `period_end_utc` | timestamptz | UTC timestamp corresponding to the end of the station-local source year. |
+| `expected_djf_hours` | bigint | Expected station-local DJF hours in January, February, and December for the source year. |
+| `valid_djf_hours` | bigint | Canonical loaded station-local DJF hours available for the station-year. |
 | `missing_hour_count` | bigint | Expected minus valid DJF hours. |
 | `loaded_file_count` | bigint | Loaded raw files contributing audit metrics for the station-year. |
 | `invalid_temp_row_count` | bigint | Missing or invalid DJF TMP rows observed during loading. |
@@ -417,11 +418,16 @@ This dictionary defines the initial publication-facing tables. It will expand as
 | `calculation_run_id` | text | Readiness run lineage. |
 | `methodology_version` | text | Methodology version. |
 | `selected_station_id` | text | Selected NOAA station used by the plant ECWT row. |
+| `selected_station_distance_km` | numeric | Distance from plant to selected station used by automated representativeness gates. |
+| `selected_station_elevation_delta_m` | numeric | Selected station elevation minus plant elevation when available, used by automated representativeness gates. |
+| `station_first_observation_utc` | timestamptz | First known station observation timestamp used to block single-station fixed-period rows whose station metadata begins after the fixed calculation period start. |
 | `valid_hour_count` | bigint | Valid DJF dry-bulb hours in the plant ECWT row. |
 | `expected_hour_count` | bigint | Expected DJF hours in the selected coverage window. |
 | `coverage_ratio` | numeric | Valid divided by expected hours. |
 | `min_valid_hour_threshold` | bigint | Gate threshold used by this readiness run. |
 | `min_coverage_ratio_threshold` | numeric | Gate threshold used by this readiness run. |
+| `max_station_distance_km_threshold` | numeric | Maximum selected-station distance allowed by the automated representativeness gate. |
+| `max_elevation_delta_m_threshold` | numeric | Maximum absolute station elevation delta allowed by the automated representativeness gate when elevation is available. |
 | `readiness_status` | text | `publication_candidate`, `provisional_low_coverage`, or `blocked`. |
 | `reason_code` | text | Machine-readable reason for the readiness status. |
 | `notes` | text | Readiness caveat or rule summary. |

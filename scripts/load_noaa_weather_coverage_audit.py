@@ -27,7 +27,7 @@ from eop012_config import PROJECT_ROOT, PSQL, SOURCE_CLUSTER_PATH, STAGING_ROOT
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 DEFAULT_SOURCE_CLUSTER_PATH = SOURCE_CLUSTER_PATH
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "legacy_noaa_station_sample_hour_coverage"
 SOURCE_BASIS = "legacy_ecwt_raw_station_sample_hours"
 

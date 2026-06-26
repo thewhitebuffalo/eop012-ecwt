@@ -15,7 +15,7 @@ from pathlib import Path
 from build_station_selection_qa_report import add_qa_flags, build_candidate_sql
 from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 REVIEWER = "system_policy_seed"
 REVIEW_BASIS = "automated_policy_seed"
 

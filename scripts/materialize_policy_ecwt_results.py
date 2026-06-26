@@ -16,8 +16,17 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
-DEFAULT_POLICY_ID = "normalized_active_window_loaded_year"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
+DEFAULT_POLICY_ID = "fixed_period_current_gate"
+POLICY_LABELS = {
+    "fixed_period_current_gate": "Current fixed-period publication gate",
+    "raw_active_window_metadata": "Raw station metadata active-window gate",
+    "raw_active_window_metadata_plus_20_loaded_years": "Raw active-window gate plus 20 loaded fixed years",
+    "normalized_active_window_loaded_year": "Normalized active-window loaded-year gate",
+    "normalized_active_window_loaded_year_plus_20_loaded_years": (
+        "Normalized active-window gate plus 20 loaded fixed years"
+    ),
+}
 
 RESULT_FIELDS = [
     "policy_result_run_id",
@@ -159,6 +168,17 @@ def run_id_from_name(path: Path, suffix: str) -> str:
 
 
 def blocker_reason(row: dict[str, str]) -> str:
+    current_class = row.get("current_blocker_class", "")
+    if current_class == "no_station_candidates":
+        return "no_station_candidates"
+    if current_class == "no_candidate_with_provisional_station_ecwt":
+        return "no_candidate_with_provisional_station_ecwt"
+    if current_class == "fixed_loaded_years_below_threshold":
+        return "fixed_loaded_years_below_threshold"
+    if current_class == "fixed_coverage_below_threshold":
+        return "fixed_period_coverage_below_threshold"
+    if current_class == "fixed_coverage_and_loaded_years_below_threshold":
+        return "fixed_period_coverage_and_loaded_years_below_threshold"
     blocker_class = row.get("normalized_active_window_class", "")
     if blocker_class == "no_station_candidates":
         return "no_station_candidates"
@@ -174,6 +194,14 @@ def candidate_reason(row: dict[str, str]) -> str:
     if source == "current_fixed_period_publication_candidate":
         return "passes_current_fixed_period_gate"
     return "passes_normalized_active_window_policy"
+
+
+def blocker_prefix(policy_id: str) -> tuple[str, str]:
+    if policy_id == "fixed_period_current_gate":
+        return "best_fixed", "fixed"
+    if policy_id.startswith("raw_active_window"):
+        return "best_active", "active"
+    return "best_normalized_active", "normalized_active"
 
 
 def candidate_result_row(
@@ -231,12 +259,13 @@ def blocker_result_row(
     denominator_run_id: str,
     row: dict[str, str],
 ) -> dict[str, object]:
+    prefix, coverage_prefix = blocker_prefix(policy_id)
     return {
         "policy_result_run_id": run_id,
         "plant_scope": plant_scope,
         "policy_id": policy_id,
-        "policy_label": "Normalized active-window loaded-year gate",
-        "policy_suitability": "candidate_policy_option",
+        "policy_label": POLICY_LABELS.get(policy_id, policy_id),
+        "policy_suitability": "current_conservative_gate" if policy_id == "fixed_period_current_gate" else "diagnostic_policy_option",
         "source_scenario_run_id": scenario_run_id,
         "source_denominator_run_id": denominator_run_id,
         "plant_id": row.get("plant_id", ""),
@@ -250,23 +279,23 @@ def blocker_result_row(
         "readiness_status": "blocked",
         "reason_code": blocker_reason(row),
         "candidate_source": "unpromoted_fixed_period_blocker",
-        "selected_station_id": row.get("best_normalized_active_station_id", ""),
-        "selected_station_name": row.get("best_normalized_active_station_name", ""),
-        "selected_station_state": row.get("best_normalized_active_station_state", ""),
-        "selected_station_country": row.get("best_normalized_active_station_country", ""),
-        "selected_station_distance_km": row.get("best_normalized_active_distance_km", ""),
-        "selected_station_rank_order": row.get("best_normalized_active_rank_order", ""),
-        "ecwt_f": row.get("best_normalized_active_station_ecwt_f", ""),
-        "valid_hour_count": row.get("best_normalized_active_normalized_active_valid_djf_hours", ""),
-        "expected_hour_count": row.get("best_normalized_active_normalized_active_expected_djf_hours", ""),
-        "coverage_ratio": row.get("best_normalized_active_normalized_active_coverage_ratio", ""),
-        "overfilled_hour_count": row.get("best_normalized_active_normalized_active_overfilled_hour_count", ""),
-        "fixed_coverage_ratio": row.get("best_normalized_active_fixed_coverage_ratio", ""),
-        "fixed_loaded_station_year_count": row.get("best_normalized_active_loaded_station_year_count", ""),
+        "selected_station_id": row.get(f"{prefix}_station_id", ""),
+        "selected_station_name": row.get(f"{prefix}_station_name", ""),
+        "selected_station_state": row.get(f"{prefix}_station_state", ""),
+        "selected_station_country": row.get(f"{prefix}_station_country", ""),
+        "selected_station_distance_km": row.get(f"{prefix}_distance_km", ""),
+        "selected_station_rank_order": row.get(f"{prefix}_rank_order", ""),
+        "ecwt_f": row.get(f"{prefix}_station_ecwt_f", ""),
+        "valid_hour_count": row.get(f"{prefix}_{coverage_prefix}_valid_djf_hours", ""),
+        "expected_hour_count": row.get(f"{prefix}_{coverage_prefix}_expected_djf_hours", ""),
+        "coverage_ratio": row.get(f"{prefix}_{coverage_prefix}_coverage_ratio", ""),
+        "overfilled_hour_count": row.get(f"{prefix}_{coverage_prefix}_overfilled_hour_count", ""),
+        "fixed_coverage_ratio": row.get(f"{prefix}_fixed_coverage_ratio", ""),
+        "fixed_loaded_station_year_count": row.get(f"{prefix}_loaded_station_year_count", ""),
         "source_blocker_class": row.get("current_blocker_class", ""),
         "source_active_window_class": row.get("active_window_class", ""),
         "source_normalized_active_window_class": row.get("normalized_active_window_class", ""),
-        "notes": "Blocked under normalized active-window loaded-year policy materialization.",
+        "notes": f"Blocked under {POLICY_LABELS.get(policy_id, policy_id)} materialization.",
     }
 
 
@@ -657,6 +686,7 @@ def render_report(
             "",
             "- This table materializes a policy scenario into one row per plant in scope.",
             "- `publication_candidate` rows are ECWT-ready under the selected policy, but still require final methodology approval before compliance publication.",
+            "- The default selected policy is the fixed-period current gate; normalized active-window scenarios are diagnostic alternatives only.",
             "- `blocked` rows remain in the table so national-scope coverage is explicit and auditable.",
             "- The conservative fixed-period readiness table is not overwritten.",
         ]

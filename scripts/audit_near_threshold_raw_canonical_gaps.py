@@ -31,7 +31,7 @@ from load_noaa_hourly_djf import (
 )
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "near_threshold_raw_canonical_gap_audit"
 
 

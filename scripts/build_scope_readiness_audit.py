@@ -17,7 +17,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 FIRST_OPERABLE_STATUSES = ("OP", "SB", "OA", "OS")
 
 SUMMARY_FIELDS = ["scope_audit_run_id", "metric", "value", "notes"]

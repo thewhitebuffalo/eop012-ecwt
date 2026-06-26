@@ -14,7 +14,7 @@ from pathlib import Path
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SESSION_WORK_MEM = "512MB"
 
 
@@ -90,7 +90,7 @@ def build_sql(run_id: str, code_commit: str, min_year: int, max_year: int) -> st
         "min_year": min_year,
         "max_year": max_year,
         "session_work_mem": SESSION_WORK_MEM,
-        "purpose": "one-time summary backfill so coverage refreshes do not rescan the hourly fact table",
+        "purpose": "one-time station-local DJF summary backfill so coverage refreshes do not rescan the hourly fact table",
     }
     return f"""
 \\set ON_ERROR_STOP on
@@ -162,17 +162,16 @@ insert into weather.station_year_hourly_summary (
 )
 select
     station_id,
-    extract(year from hour_ending_utc at time zone 'UTC')::integer as source_year,
+    extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer as source_year,
     count(*)::bigint as valid_djf_hours,
     min(hour_ending_utc) as min_hour_ending_utc,
     max(hour_ending_utc) as max_hour_ending_utc,
     now() as refreshed_at_utc,
-    'weather.hourly_djf full-table backfill by backfill_station_year_hourly_summary.py' as source_basis
+    'weather.hourly_djf station-local DJF full-table backfill by backfill_station_year_hourly_summary.py' as source_basis
 from weather.hourly_djf
-where hour_ending_utc >= make_timestamptz({min_year}, 1, 1, 0, 0, 0.0, 'UTC')
-  and hour_ending_utc < make_timestamptz({max_year + 1}, 1, 1, 0, 0, 0.0, 'UTC')
-  and extract(month from hour_ending_utc at time zone 'UTC') in (12, 1, 2)
-group by station_id, extract(year from hour_ending_utc at time zone 'UTC')::integer
+where extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer between {min_year} and {max_year}
+  and extract(month from coalesce(hour_local, hour_ending_utc at time zone 'UTC')) in (12, 1, 2)
+group by station_id, extract(year from coalesce(hour_local, hour_ending_utc at time zone 'UTC'))::integer
 on conflict (station_id, source_year) do update set
     valid_djf_hours = excluded.valid_djf_hours,
     min_hour_ending_utc = excluded.min_hour_ending_utc,
@@ -248,7 +247,7 @@ def render_report(
             "## Interpretation",
             "",
             "- This is an operational summary of canonical loaded DJF weather rows, not a final ECWT result.",
-            "- The table lets station-year coverage refreshes read one row per station-year instead of rescanning `weather.hourly_djf`.",
+            "- The table lets station-year coverage refreshes read one row per station-local calendar year instead of rescanning `weather.hourly_djf`.",
             "- Future NOAA DJF loads refresh touched station-years in this table automatically.",
             "",
         ]

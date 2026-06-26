@@ -15,7 +15,7 @@ from pathlib import Path
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 
 MATRIX_FIELDS = [
     "scenario_id",

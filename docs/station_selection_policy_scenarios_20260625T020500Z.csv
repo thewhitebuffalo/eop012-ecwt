@@ -1,9 +1,0 @@
-scenario_id,scenario_name,description,accepted_rows,blocked_rows,distinct_selected_stations,plant_states,station_countries,min_coverage_ratio,median_coverage_ratio,max_distance_km,max_rank_order,min_ecwt_f,max_ecwt_f
-current_gate,Current review gate,No station-selection review rows are accepted until a reviewer or policy run updates them.,0,162,0,,,,,,,,
-us_same_state_core,US same-state core,"Accept only US stations in the same state, within 50 km, rank <= 3, and coverage >= 0.97.",0,162,0,,,,,,,,
-us_regional_core,US regional core,"Accept US stations within 75 km, rank <= 3, and coverage >= 0.97; state mismatch may still need review.",0,162,0,,,,,,,,
-us_fixed_gate_only,US fixed-period gate only,Accept US stations that pass the fixed-period coverage gate regardless of rank or distance.,52,110,1,UT:50;NV:2,US:52,0.951374,0.951374,149.459,10,-9.94,-9.94
-us_ca_core,US and Canada core,"Accept US or Canadian stations within 75 km, rank <= 3, and coverage >= 0.97.",3,159,1,WA:3,CA:3,0.976406,0.976406,42.132,2,10.4,10.4
-us_ca_practical,US and Canada practical,"Accept US or Canadian stations within 75 km, rank <= 10, and coverage >= 0.95.",108,54,12,NY:43;UT:32;WA:15;VT:10;ND:5;ID:2;MI:1,CA:76;US:32,0.951374,0.960552,74.95,10,-31.0,10.4
-us_ca_distance_cap_150,US and Canada distance cap 150 km,"Accept US or Canadian stations within 150 km, rank <= 10, and coverage >= 0.95.",162,0,19,NY:52;UT:50;WA:23;MT:11;VT:10;ME:6;ND:5;ID:2;NV:2;MI:1,CA:110;US:52,0.950149,0.959647,149.459,10,-32.8,10.4
-fixed_coverage_only,Fixed-period coverage only,"Accept every current fixed-period candidate, ignoring station-selection QA flags.",162,0,19,NY:52;UT:50;WA:23;MT:11;VT:10;ME:6;ND:5;ID:2;NV:2;MI:1,CA:110;US:52,0.950149,0.959647,149.459,10,-32.8,10.4
