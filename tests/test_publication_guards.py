@@ -104,11 +104,16 @@ class DashboardGuardTests(unittest.TestCase):
                     [
                         "plant_latitude,plant_longitude,ecwt_f,plant_state,plant_name,primary_station_distance_km,readiness_status,reason_code",
                         "44.1,-73.2,-12.3,VT,O'Brien Hydro,24.5,publication_candidate,passes_current_fixed_period_gate",
+                        ",,,AK,No Candidate Plant,,blocked,no_station_candidates",
                     ]
                 ),
                 encoding="utf-8",
             )
             payload = ecwt_dashboard.build_payload(release_csv)
+            self.assertEqual(payload["kpis"]["plants"], 2)
+            self.assertEqual(payload["kpis"]["plotted"], 1)
+            self.assertEqual(payload["quality"]["rowsMissingEcwt"], 1)
+            self.assertEqual(payload["quality"]["reasonCodes"]["no_station_candidates"], 1)
             template = ecwt_dashboard.DEFAULT_TEMPLATE.read_text(encoding="utf-8")
             html = template.replace(
                 ecwt_dashboard.PLACEHOLDER,

@@ -115,13 +115,18 @@
   var releaseId = q.releaseId || "scoped_plant_ecwt_release";
   document.getElementById("sourceSub").innerHTML =
     'Source: <code style="font-size:11px">'+releaseId+'</code> · '+
-    D.kpis.plants.toLocaleString()+' release rows · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)';
+    D.kpis.plants.toLocaleString()+' policy rows · '+D.kpis.plotted.toLocaleString()+
+    ' plotted rows with coordinates and ECWT · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)';
   var far100 = q.far100 || 0;
   var farPct = q.far100pct == null ? 0 : q.far100pct;
   var strictReason = q.reasonCodes && q.reasonCodes.passes_current_fixed_period_gate === D.kpis.plants;
+  var publicationCandidates = (q.statuses && q.statuses.publication_candidate) || 0;
+  var blockedRows = (q.statuses && q.statuses.blocked) || 0;
   document.getElementById("qualityBanner").innerHTML = strictReason && far100 === 0
     ? '<b>Fixed-period publication-candidate preview.</b> Every row shown passed the current fixed-period gate, and every recorded primary station is within 100 km. Use this for review and visualization; retain the CSV/report audit trail for any compliance workflow.'
-    : '<b>Analytical preview.</b> This dashboard reflects the release CSV it was given. Review station representativeness, coverage basis, and caveats before treating the values as compliance inputs.';
+    : '<b>All-plants fixed-period policy result.</b> This view includes '+publicationCandidates.toLocaleString()+
+      ' publication candidates and '+blockedRows.toLocaleString()+
+      ' blocked rows. Blocked rows are shown for diagnosis, not as release-ready compliance outputs.';
   document.getElementById("distSub").innerHTML = q.knownDistance
     ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
@@ -135,14 +140,14 @@
   // ---------- KPIs ----------
   var k=D.kpis;
   var cards=[
-    ["v "+k.plants.toLocaleString(),"Plants"],
-    [k.below32pct+"%","ECWT &lt; 32&deg;F (applicable)","flag"],
+    ["v "+k.plants.toLocaleString(),"Policy rows"],
+    [k.plotted.toLocaleString(),"Rows plotted"],
+    [publicationCandidates.toLocaleString(),"Publication candidates"],
+    [blockedRows.toLocaleString(),"Blocked rows","flag"],
+    [k.below32pct+"%","ECWT &lt; 32&deg;F among ECWT rows","flag"],
     [fmt(k.meanF)+"&deg;","Mean ECWT"],
-    [fmt(k.medianF)+"&deg;","Median ECWT"],
     [fmt(k.minF)+"&deg;","Coldest plant"],
-    [fmt(k.maxF)+"&deg;","Warmest plant"],
-    [k.states,"States"],
-    [k.distinct,"Distinct values"]
+    [k.states,"States"]
   ];
   document.getElementById("kpis").innerHTML = cards.map(function(c){
     var v=String(c[0]).replace(/^v /,"");
@@ -237,7 +242,9 @@
     }
     if(best){
       tip.innerHTML="<b>"+best.n+"</b> ("+best.s+")<br>ECWT "+fmt(best.e)+"°F"+
-        (best.d!=null?"<br>station "+best.d+" km away":"<br>station distance n/a");
+        (best.d!=null?"<br>station "+best.d+" km away":"<br>station distance n/a")+
+        (best.st?"<br>"+best.st:"")+
+        (best.r?"<br>"+best.r:"");
       tip.style.left=(ev.clientX+14)+"px"; tip.style.top=(ev.clientY+14)+"px"; tip.style.opacity=1;
     } else tip.style.opacity=0;
   });

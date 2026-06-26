@@ -58,17 +58,22 @@ def build_payload(release_csv: Path) -> dict:
     dist = {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "u": 0}  # <25,25-50,50-100,100-200,>200,unknown
     statuses = {}
     reason_codes = {}
+    total_rows = 0
+    rows_with_coords = 0
+    rows_with_ecwt = 0
+    plotted_rows = 0
 
     with release_csv.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            total_rows += 1
             la = _f(row.get("plant_latitude"))
             lo = _f(row.get("plant_longitude"))
             e = _f(row.get("ecwt_f"))
-            if la is None or lo is None or e is None:
-                continue
             state = (row.get("plant_state") or "").strip()
             d = _f(row.get("primary_station_distance_km"))
+            if d is None:
+                d = _f(row.get("selected_station_distance_km"))
             if d is None:
                 dist["u"] += 1
                 d_out = None
@@ -90,16 +95,24 @@ def build_payload(release_csv: Path) -> dict:
                 statuses[status] = statuses.get(status, 0) + 1
             if reason_code:
                 reason_codes[reason_code] = reason_codes.get(reason_code, 0) + 1
-            points.append({
-                "la": round(la, 3),
-                "lo": round(lo, 3),
-                "e": round(e, 1),
-                "s": state,
-                "d": d_out,
-                "n": (row.get("plant_name") or "").strip(),
-            })
-            vals.append(e)
-            by_state.setdefault(state, []).append(e)
+            if la is not None and lo is not None:
+                rows_with_coords += 1
+            if e is not None:
+                rows_with_ecwt += 1
+                vals.append(e)
+            if la is not None and lo is not None and e is not None:
+                plotted_rows += 1
+                points.append({
+                    "la": round(la, 3),
+                    "lo": round(lo, 3),
+                    "e": round(e, 1),
+                    "s": state,
+                    "d": d_out,
+                    "n": (row.get("plant_name") or "").strip(),
+                    "r": reason_code,
+                    "st": status,
+                })
+                by_state.setdefault(state, []).append(e)
 
     if not vals:
         raise SystemExit(f"No usable rows (need plant_latitude/longitude/ecwt_f) in {release_csv}")
@@ -109,7 +122,11 @@ def build_payload(release_csv: Path) -> dict:
     median = svals[n // 2] if n % 2 else (svals[n // 2 - 1] + svals[n // 2]) / 2
     below32 = sum(1 for v in vals if v < 32)
     kpis = {
-        "plants": n,
+        "plants": total_rows,
+        "plotted": plotted_rows,
+        "rowsWithCoords": rows_with_coords,
+        "rowsWithEcwt": rows_with_ecwt,
+        "rowsMissingEcwt": total_rows - rows_with_ecwt,
         "states": len(by_state),
         "minF": round(min(vals), 1),
         "maxF": round(max(vals), 1),
@@ -130,6 +147,10 @@ def build_payload(release_csv: Path) -> dict:
         "far100pct": round(100 * far100 / known_distance, 1) if known_distance else None,
         "within100": dist["a"] + dist["b"] + dist["c"],
         "within25pct": round(100 * dist["a"] / known_distance, 1) if known_distance else None,
+        "plottedRows": plotted_rows,
+        "rowsWithEcwt": rows_with_ecwt,
+        "rowsMissingEcwt": total_rows - rows_with_ecwt,
+        "rowsMissingCoords": total_rows - rows_with_coords,
         "statuses": statuses,
         "reasonCodes": reason_codes,
     }
