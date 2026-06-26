@@ -123,11 +123,11 @@
     ? '<b>Fixed-period publication-candidate preview.</b> Every row shown passed the current fixed-period gate, and every recorded primary station is within 100 km. Use this for review and visualization; retain the CSV/report audit trail for any compliance workflow.'
     : '<b>Analytical preview.</b> This dashboard reflects the release CSV it was given. Review station representativeness, coverage basis, and caveats before treating the values as compliance inputs.';
   document.getElementById("distSub").innerHTML = q.knownDistance
-    ? 'How far is each plant\\'s assigned primary weather station? '+
+    ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
       ' rows with recorded distance are within 100 km; '+far100.toLocaleString()+
       ' rows ('+farPct+'%) are 100 km or farther away.'
-    : 'How far is each plant\\'s assigned primary weather station? No station-distance values were recorded in the input CSV.';
+    : "How far is each plant's assigned primary weather station? No station-distance values were recorded in the input CSV.";
   document.getElementById("histSub").innerHTML =
     '3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct ECWT values in this release: '+
     D.kpis.distinct+'.';

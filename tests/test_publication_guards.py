@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import export_scoped_plant_ecwt_dataset as scoped_export  # noqa: E402
+import build_ecwt_dashboard as ecwt_dashboard  # noqa: E402
 import build_readiness_policy_scenarios as policy_scenarios  # noqa: E402
 import materialize_policy_ecwt_results as policy_results  # noqa: E402
 
@@ -84,6 +90,43 @@ class PolicyScenarioGuardTests(unittest.TestCase):
         )
 
         self.assertEqual(result["selected_station_distance_km"], "24.75")
+
+
+class DashboardGuardTests(unittest.TestCase):
+    def test_dashboard_template_scripts_parse_after_data_injection(self) -> None:
+        if shutil.which("node") is None:
+            self.skipTest("node is not available for JavaScript syntax check")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            release_csv = Path(tmp) / "scoped_plant_ecwt_release_test.csv"
+            release_csv.write_text(
+                "\n".join(
+                    [
+                        "plant_latitude,plant_longitude,ecwt_f,plant_state,plant_name,primary_station_distance_km,readiness_status,reason_code",
+                        "44.1,-73.2,-12.3,VT,O'Brien Hydro,24.5,publication_candidate,passes_current_fixed_period_gate",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            payload = ecwt_dashboard.build_payload(release_csv)
+            template = ecwt_dashboard.DEFAULT_TEMPLATE.read_text(encoding="utf-8")
+            html = template.replace(
+                ecwt_dashboard.PLACEHOLDER,
+                "window.ECWT = " + json.dumps(payload, separators=(",", ":")) + ";",
+            )
+            scripts = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+            script_path = Path(tmp) / "dashboard.js"
+            script_path.write_text(scripts, encoding="utf-8")
+
+            result = subprocess.run(
+                ["node", "--check", str(script_path)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class ScopedExportGuardTests(unittest.TestCase):
