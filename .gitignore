@@ -19,3 +19,6 @@ docs/*.csv
 docs/*T*Z*.md
 docs/scoped_plant_ecwt_release_*_manifest.json
 docs/noaa_backfill_download_batch*_report.md
+
+# Generated visualization output (publish via Pages/Release, not git)
+build/
