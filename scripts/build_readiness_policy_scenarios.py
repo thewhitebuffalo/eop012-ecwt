@@ -57,8 +57,8 @@ SCENARIOS = OrderedDict(
                 "source": "denominator diagnostic normalized active-window columns",
                 "promotion_field": "normalized_active_window_eligible_candidate_count",
                 "candidate_prefix": "best_normalized_active",
-                "suitability": "candidate_policy_option",
-                "notes": "Expands station metadata windows to full loaded station-years; removes active-window overfill in the current diagnostic.",
+                "suitability": "diagnostic_only_not_publication_gate",
+                "notes": "Expands station metadata windows to full loaded station-years; retained only as a diagnostic because it is not fixed-period publication coverage.",
             },
         ),
         (
@@ -68,8 +68,8 @@ SCENARIOS = OrderedDict(
                 "source": "denominator diagnostic normalized active-window plus absolute loaded-year columns",
                 "promotion_field": "normalized_active_coverage_absolute_loaded_eligible_candidate_count",
                 "candidate_prefix": "best_normalized_active",
-                "suitability": "candidate_policy_option_stricter",
-                "notes": "Normalized active-window coverage screen with the current absolute 20 loaded station-year rule retained.",
+                "suitability": "diagnostic_only_not_publication_gate",
+                "notes": "Normalized active-window coverage screen with the current absolute 20 loaded station-year rule retained; not a publication gate.",
             },
         ),
     ]

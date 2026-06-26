@@ -18,6 +18,8 @@ from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 DEFAULT_POLICY_ID = "fixed_period_current_gate"
+PUBLICATION_POLICY_IDS = {DEFAULT_POLICY_ID}
+DIAGNOSTIC_CANDIDATE_STATUS = "diagnostic_candidate"
 POLICY_LABELS = {
     "fixed_period_current_gate": "Current fixed-period publication gate",
     "raw_active_window_metadata": "Raw station metadata active-window gate",
@@ -189,11 +191,21 @@ def blocker_reason(row: dict[str, str]) -> str:
     return "not_promoted_under_policy"
 
 
-def candidate_reason(row: dict[str, str]) -> str:
+def candidate_status(policy_id: str) -> str:
+    if policy_id in PUBLICATION_POLICY_IDS:
+        return "publication_candidate"
+    return DIAGNOSTIC_CANDIDATE_STATUS
+
+
+def candidate_reason(row: dict[str, str], policy_id: str) -> str:
     source = row.get("candidate_source", "")
+    if policy_id not in PUBLICATION_POLICY_IDS:
+        if source == "current_fixed_period_publication_candidate":
+            return "retained_current_fixed_period_candidate_for_diagnostic_policy"
+        return "passes_diagnostic_active_window_policy_only"
     if source == "current_fixed_period_publication_candidate":
         return "passes_current_fixed_period_gate"
-    return "passes_normalized_active_window_policy"
+    return "unexpected_non_fixed_candidate_source"
 
 
 def blocker_prefix(policy_id: str) -> tuple[str, str]:
@@ -228,8 +240,8 @@ def candidate_result_row(
         "sector_name": row.get("sector_name", ""),
         "first_scope_generator_count": row.get("first_scope_generator_count", ""),
         "first_scope_nameplate_mw": row.get("first_scope_nameplate_mw", ""),
-        "readiness_status": "publication_candidate",
-        "reason_code": candidate_reason(row),
+        "readiness_status": candidate_status(policy_id),
+        "reason_code": candidate_reason(row, policy_id),
         "candidate_source": row.get("candidate_source", ""),
         "selected_station_id": row.get("selected_station_id", ""),
         "selected_station_name": row.get("selected_station_name", ""),
@@ -649,6 +661,7 @@ def render_report(
         "| --- | ---: |",
         f"| Plant rows materialized | {len(rows):,} |",
         f"| Publication candidates | {status_counts['publication_candidate']:,} |",
+        f"| Diagnostic candidates | {status_counts[DIAGNOSTIC_CANDIDATE_STATUS]:,} |",
         f"| Blocked rows | {status_counts['blocked']:,} |",
         "",
         "## Loaded DB Counts",
@@ -685,8 +698,9 @@ def render_report(
             "## Interpretation",
             "",
             "- This table materializes a policy scenario into one row per plant in scope.",
-            "- `publication_candidate` rows are ECWT-ready under the selected policy, but still require final methodology approval before compliance publication.",
-            "- The default selected policy is the fixed-period current gate; normalized active-window scenarios are diagnostic alternatives only.",
+            "- `publication_candidate` rows are ECWT-ready only under the fixed-period current gate, but still require final methodology approval before compliance publication.",
+            "- Diagnostic active-window policies are materialized as `diagnostic_candidate`, not `publication_candidate`.",
+            "- The default selected policy is the fixed-period current gate; normalized active-window scenarios are diagnostics only.",
             "- `blocked` rows remain in the table so national-scope coverage is explicit and auditable.",
             "- The conservative fixed-period readiness table is not overwritten.",
         ]
@@ -804,6 +818,21 @@ def main() -> None:
                     select count(*) from calc.plant_ecwt_policy_result
                     where policy_result_run_id = {sql_literal(run_id)}
                       and readiness_status = 'publication_candidate';
+                    """,
+                ),
+            ),
+            (
+                "diagnostic candidates",
+                psql_scalar(
+                    args.psql,
+                    args.host,
+                    args.port,
+                    args.dbname,
+                    args.user,
+                    f"""
+                    select count(*) from calc.plant_ecwt_policy_result
+                    where policy_result_run_id = {sql_literal(run_id)}
+                      and readiness_status = {sql_literal(DIAGNOSTIC_CANDIDATE_STATUS)};
                     """,
                 ),
             ),

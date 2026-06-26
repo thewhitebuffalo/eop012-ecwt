@@ -20,9 +20,14 @@ from eop012_config import PROJECT_ROOT, PSQL
 
 METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "secondary_station_fill_ecwt"
-DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_"
+DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_fixed_period_current_gate_"
 DEFAULT_CANDIDATE_PREFIX = "noaa_station_candidates_"
 DEFAULT_STATION_ECWT_PREFIX = "station_ecwt_loaded_"
+FIXED_PERIOD_FILL_REASON_CODES = (
+    "fixed_period_coverage_below_threshold",
+    "fixed_period_coverage_and_loaded_years_below_threshold",
+)
+MAX_PRIMARY_STATION_DISTANCE_KM = 100.0
 
 BEST_FIELDS = [
     "secondary_fill_id",
@@ -301,8 +306,11 @@ def score_query(
         join asset.plant p using (plant_id)
         where pr.policy_result_run_id = {sql_literal(policy_result_run_id)}
           and pr.readiness_status = 'blocked'
-          and pr.reason_code = 'normalized_active_window_coverage_below_threshold'
+          and pr.policy_id = 'fixed_period_current_gate'
+          and pr.reason_code in ({sql_list(FIXED_PERIOD_FILL_REASON_CODES)})
           and pr.selected_station_id is not null
+          and pr.selected_station_distance_km is not null
+          and pr.selected_station_distance_km <= {MAX_PRIMARY_STATION_DISTANCE_KM}
           and {state_filter}
           and {plant_filter}
     ),

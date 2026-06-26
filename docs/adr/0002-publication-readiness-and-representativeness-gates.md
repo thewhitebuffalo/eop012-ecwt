@@ -25,6 +25,11 @@ Automated `publication_candidate` status requires all of the following gates:
 - selected station metadata must not begin after 2000-01-01 for a fixed-period single-station publication candidate
 - station-local DJF time basis from ADR 0001
 
+Normalized active-window coverage, raw active-window coverage, and loaded-year
+coverage scenarios are diagnostic artifacts. They may identify stations worth
+reviewing, but they must not be materialized as `publication_candidate` rows and
+must not be exported as scoped release rows.
+
 Rows that fail any gate must not be exported as ordinary publication candidates. They remain auditable with reason codes such as:
 
 - `fixed_period_coverage_below_threshold`
@@ -49,3 +54,16 @@ Segmentation must record each station, date span, reason code, and whether the s
 This policy will block many rows that previously appeared publication-ready. That is the correct outcome: they may still be useful analytical rows, but they are not suitable for a compliance-facing national release without additional station review, missing-hour treatment, or segmentation.
 
 The 100 km and 300 m thresholds are conservative automated gates, not proof that every station inside the threshold is representative. Plant-owner review may still reject a nearby station because of topography, large water bodies, siting, or known local climate effects.
+
+## Implementation Safeguards
+
+Release export code must reject any policy-result run whose `policy_id` is not
+`fixed_period_current_gate`. Exported policy-result rows must also carry
+`reason_code = passes_current_fixed_period_gate`, fixed-period coverage of at
+least 0.95, at least 30,000 valid DJF hours, and a non-null selected-station
+distance no greater than 100 km.
+
+Secondary-station fill rows must be tied to the same fixed-period policy result
+run as the export. The primary station remains the representative station, so
+secondary-fill rows must meet the same primary-station distance gate and must
+meet fixed-composite coverage and valid-hour gates before export.

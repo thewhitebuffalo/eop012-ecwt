@@ -207,6 +207,7 @@ The current national publication gate is the fixed-period current gate:
 - The denominator is the full station-local DJF calculation period for the selected station or documented composite series.
 - Rows are publication-ready only when fixed-period coverage meets or exceeds the configured threshold, currently 0.95, and all other sufficiency and representativeness gates pass.
 - Normalized active-window loaded-year scenarios are retained as diagnostics only; they are not a publication gate.
+- Diagnostic policy materializations must use `diagnostic_candidate`, not `publication_candidate`, for active-window rows. Scoped release exports must reject any policy-result run that is not `fixed_period_current_gate`.
 - Blocked rows preserve the reason code, including no station candidates, no provisional station ECWT, insufficient loaded station-years, and fixed-period coverage below threshold.
 
 ## Secondary Station Fill For Missing Primary Hours
