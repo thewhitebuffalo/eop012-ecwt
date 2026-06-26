@@ -51,13 +51,11 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>EOP-012 Extreme Cold Weather Temperature — National Dashboard</h1>
-    <div class="sub">Source: <code style="font-size:11px">scoped_plant_ecwt_release_20260625T161629Z</code> · 15,947 non-Alaska EIA-860 plants · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)</div>
+    <h1>EOP-012 Extreme Cold Weather Temperature — Release Dashboard</h1>
+    <div class="sub" id="sourceSub"></div>
   </header>
 
-  <div class="banner">
-    <b>Analytical / provisional — not compliance-grade.</b> Many plants are matched to a representative station far away and coverage is measured on a relaxed denominator, so values (e.g. California reading warm) can be unrepresentative. Use for exploration, not as an EOP-012 filing input. See the "Data-quality reality check" panel below.
-  </div>
+  <div class="banner" id="qualityBanner"></div>
 
   <div class="kpis" id="kpis"></div>
 
@@ -74,12 +72,12 @@
       <div class="legend" id="maplegend">
         <span id="legL">colder</span><div class="bar" id="legbar"></div><span id="legR">warmer</span>
       </div>
-      <div class="mapnote" id="mapnote">Map shows the contiguous U.S.; Hawaii (93 plants) and any off-extent points are excluded from the map but included in all statistics. Alaska is excluded from the dataset by scope.</div>
+      <div class="mapnote" id="mapnote"></div>
     </div>
 
     <div class="card">
       <h2>Distribution of ECWT</h2>
-      <div class="h-sub">3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Note the spikes — only 64 distinct values exist (whole-degree-C source resolution).</div>
+      <div class="h-sub" id="histSub"></div>
       <svg id="hist" width="100%" viewBox="0 0 520 300" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
 
@@ -96,15 +94,14 @@
 
     <div class="card full">
       <h2>Data-quality reality check — station representativeness</h2>
-      <div class="h-sub">How far is each plant's assigned primary weather station? Only ~3% are within 25&nbsp;km; most are 100&nbsp;km+ away — the core reason these ECWT values are provisional.</div>
+      <div class="h-sub" id="distSub"></div>
       <svg id="dist" width="100%" viewBox="0 0 1000 150" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
   </div>
 
   <div class="foot">
     Generated locally from the public repo <code>thewhitebuffalo/eop012-ecwt</code>. ECWT below 32&deg;F is the EOP-012 applicability trigger.
-    Known caveats are tracked as GitHub issues #1–#8 (station distance, relaxed coverage denominator, value quantization, missing caveats on the export).
-    This dashboard is a self-contained local file (<code>EOP012_ECWT_dashboard.html</code> + <code>data.js</code>); it uses no internet connection.
+    This dashboard is a self-contained local file; it embeds its data and uses no internet connection.
   </div>
 </div>
 <div class="tip" id="tip"></div>
@@ -112,8 +109,28 @@
 <script>
 (function(){
   var D = window.ECWT;
-  if(!D){document.body.innerHTML="<p style='padding:30px'>data.js not found next to this file.</p>";return;}
+  if(!D){document.body.innerHTML="<p style='padding:30px'>embedded ECWT data not found in this file.</p>";return;}
   var fmt = function(x){return (x>0?"+":"")+x.toFixed(1);};
+  var q = D.quality || {};
+  var releaseId = q.releaseId || "scoped_plant_ecwt_release";
+  document.getElementById("sourceSub").innerHTML =
+    'Source: <code style="font-size:11px">'+releaseId+'</code> · '+
+    D.kpis.plants.toLocaleString()+' release rows · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)';
+  var far100 = q.far100 || 0;
+  var farPct = q.far100pct == null ? 0 : q.far100pct;
+  var strictReason = q.reasonCodes && q.reasonCodes.passes_current_fixed_period_gate === D.kpis.plants;
+  document.getElementById("qualityBanner").innerHTML = strictReason && far100 === 0
+    ? '<b>Fixed-period publication-candidate preview.</b> Every row shown passed the current fixed-period gate, and every recorded primary station is within 100 km. Use this for review and visualization; retain the CSV/report audit trail for any compliance workflow.'
+    : '<b>Analytical preview.</b> This dashboard reflects the release CSV it was given. Review station representativeness, coverage basis, and caveats before treating the values as compliance inputs.';
+  document.getElementById("distSub").innerHTML = q.knownDistance
+    ? 'How far is each plant\\'s assigned primary weather station? '+
+      q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
+      ' rows with recorded distance are within 100 km; '+far100.toLocaleString()+
+      ' rows ('+farPct+'%) are 100 km or farther away.'
+    : 'How far is each plant\\'s assigned primary weather station? No station-distance values were recorded in the input CSV.';
+  document.getElementById("histSub").innerHTML =
+    '3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct ECWT values in this release: '+
+    D.kpis.distinct+'.';
 
   // ---------- KPIs ----------
   var k=D.kpis;
@@ -160,6 +177,10 @@
   var cv=document.getElementById("map"), ctx=cv.getContext("2d");
   var mode="temp";
   var pts=D.points;
+  var offExtent = pts.filter(function(p){return p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1;}).length;
+  document.getElementById("mapnote").textContent = offExtent
+    ? "Map shows the contiguous U.S. extent; "+offExtent.toLocaleString()+" off-extent rows are excluded from the map but included in all statistics."
+    : "Map shows all release rows within the contiguous U.S. extent.";
   function project(p,w,h){
     var x=(p.lo-LON0)/(LON1-LON0)*w;
     var y=(LAT1-p.la)/(LAT1-LAT0)*h;
@@ -314,8 +335,9 @@
       x+=w;
     });
     // callout
-    var farPct=Math.round(((d.d+d.e)/tot)*100);
-    s+='<text x="'+pad.l+'" y="'+(y+h+24)+'" font-size="11.5" fill="#b4232a"><tspan font-weight="700">'+farPct+'%</tspan> of plants are matched to a station 100 km or farther away.</text>';
+    var farPct=tot ? Math.round(((d.d+d.e)/tot)*100) : 0;
+    var farColor=(d.d+d.e)>0 ? "#b4232a" : "#1a7650";
+    s+='<text x="'+pad.l+'" y="'+(y+h+24)+'" font-size="11.5" fill="'+farColor+'"><tspan font-weight="700">'+farPct+'%</tspan> of rows are matched to a station 100 km or farther away.</text>';
     document.getElementById("dist").innerHTML=s;
   })();
 

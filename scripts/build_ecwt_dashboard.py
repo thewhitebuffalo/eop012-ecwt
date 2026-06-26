@@ -56,6 +56,8 @@ def build_payload(release_csv: Path) -> dict:
     vals = []
     by_state = {}
     dist = {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "u": 0}  # <25,25-50,50-100,100-200,>200,unknown
+    statuses = {}
+    reason_codes = {}
 
     with release_csv.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -82,6 +84,12 @@ def build_payload(release_csv: Path) -> dict:
                     dist["d"] += 1
                 else:
                     dist["e"] += 1
+            status = (row.get("readiness_status") or "").strip()
+            reason_code = (row.get("reason_code") or "").strip()
+            if status:
+                statuses[status] = statuses.get(status, 0) + 1
+            if reason_code:
+                reason_codes[reason_code] = reason_codes.get(reason_code, 0) + 1
             points.append({
                 "la": round(la, 3),
                 "lo": round(lo, 3),
@@ -112,6 +120,20 @@ def build_payload(release_csv: Path) -> dict:
         "below32pct": round(100 * below32 / n, 1),
     }
 
+    release_id = release_csv.stem
+    far100 = dist["d"] + dist["e"]
+    known_distance = sum(dist[key] for key in ("a", "b", "c", "d", "e"))
+    quality = {
+        "releaseId": release_id,
+        "knownDistance": known_distance,
+        "far100": far100,
+        "far100pct": round(100 * far100 / known_distance, 1) if known_distance else None,
+        "within100": dist["a"] + dist["b"] + dist["c"],
+        "within25pct": round(100 * dist["a"] / known_distance, 1) if known_distance else None,
+        "statuses": statuses,
+        "reasonCodes": reason_codes,
+    }
+
     state_rows = []
     for s, g in by_state.items():
         b = sum(1 for v in g if v < 32)
@@ -130,7 +152,7 @@ def build_payload(release_csv: Path) -> dict:
         hist.append({"x0": x, "x1": x + 3, "c": c})
         x += 3
 
-    return {"kpis": kpis, "byState": state_rows, "hist": hist, "dist": dist, "points": points}
+    return {"kpis": kpis, "quality": quality, "byState": state_rows, "hist": hist, "dist": dist, "points": points}
 
 
 def main() -> int:

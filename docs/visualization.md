@@ -56,9 +56,8 @@ The generated HTML embeds roughly 1 MB of derived plant data, so per
 
 ## Caveat
 
-The dashboard reflects whatever release CSV it is given. Current scoped releases
-are **analytical / provisional, not compliance-grade**: many plants are matched to
-distant stations and coverage can be measured on a relaxed denominator. The
-dashboard surfaces these caveats (banner + distance panel) rather than hiding
-them. Regenerate it after any release that applies the readiness and
-representativeness gates (see `docs/adr/`).
+The dashboard reflects whatever release CSV it is given. The generated page
+surfaces source release, readiness reason codes, and station-distance buckets so
+older diagnostic releases and stricter fixed-period publication-candidate
+releases do not get visually conflated. Regenerate it after any release that
+changes the readiness or representativeness gates (see `docs/adr/`).
