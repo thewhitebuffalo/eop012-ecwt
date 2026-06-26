@@ -14,7 +14,7 @@ from pathlib import Path
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SESSION_WORK_MEM = "256MB"
 
 
@@ -211,6 +211,18 @@ with coverage as (
     where calculation_run_id = {sql_literal(coverage_run_id)}
     group by station_id
 ),
+localized_hourly as (
+    select
+        hourly.station_id,
+        hourly.hour_ending_utc,
+        hourly.dry_bulb_c,
+        hourly.dry_bulb_f,
+        (hourly.hour_ending_utc at time zone 'UTC')
+            + make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0)) as hour_local_computed
+    from weather.hourly_djf hourly
+    join weather.station station
+      on station.station_id = hourly.station_id
+),
 stats as (
     select
         station_id,
@@ -219,7 +231,8 @@ stats as (
         percentile_cont({percentile_target}) within group (order by dry_bulb_c) as ecwt_c,
         percentile_cont({percentile_target}) within group (order by dry_bulb_f) as ecwt_f,
         greatest(ceil({percentile_target} * count(*))::integer, 1) as discrete_rank
-    from weather.hourly_djf
+    from localized_hourly
+    where extract(month from hour_local_computed) in (12, 1, 2)
     group by station_id
 ),
 ranked as (
@@ -228,7 +241,8 @@ ranked as (
         dry_bulb_c,
         dry_bulb_f,
         row_number() over (partition by station_id order by dry_bulb_c, hour_ending_utc) as cold_rank
-    from weather.hourly_djf
+    from localized_hourly
+    where extract(month from hour_local_computed) in (12, 1, 2)
 ),
 discrete as (
     select
@@ -308,8 +322,8 @@ def report_counts(psql: Path, host: str, port: int, dbname: str, run_id: str, us
             ("station ECWT rows for this run", f"select count(*) from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)};"),
             ("provisional rows", f"select count(*) from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)} and result_status = 'provisional';"),
             ("blocked rows", f"select count(*) from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)} and result_status = 'blocked';"),
-            ("minimum ECWT F", f"select coalesce(round(min(ecwt_f), 3)::text, '') from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)};"),
-            ("maximum ECWT F", f"select coalesce(round(max(ecwt_f), 3)::text, '') from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)};"),
+            ("minimum ECWT F", f"select coalesce(round(min(ecwt_f), 1)::text, '') from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)};"),
+            ("maximum ECWT F", f"select coalesce(round(max(ecwt_f), 1)::text, '') from calc.station_ecwt where calculation_run_id = {sql_literal(run_id)};"),
         ]
     )
     rows = OrderedDict()
@@ -419,8 +433,8 @@ def main() -> int:
         select
             station_id,
             valid_hour_count,
-            round(ecwt_f, 3) as ecwt_f,
-            round(ecwt_discrete_f, 3) as ecwt_discrete_f,
+            round(ecwt_f, 1) as ecwt_f,
+            round(ecwt_discrete_f, 1) as ecwt_discrete_f,
             result_status
         from calc.station_ecwt
         where calculation_run_id = {sql_literal(run_id)}

@@ -19,7 +19,7 @@ from eop012_config import NOAA_RAW_ROOTS, PROJECT_ROOT, PSQL, STAGING_ROOT
 
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "noaa_global_hourly_local_raw_inventory"
 DEFAULT_RAW_ROOTS = NOAA_RAW_ROOTS
 

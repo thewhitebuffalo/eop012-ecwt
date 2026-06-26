@@ -16,7 +16,7 @@ import json
 import math
 import subprocess
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -24,7 +24,7 @@ from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "noaa_global_hourly_djf_load"
 DJF_MONTHS = {12, 1, 2}
 SHEF_MIN_TEMP_C = -50.0
@@ -125,6 +125,12 @@ def copy_command(table: str, columns: list[str], path: Path) -> str:
 
 def ensure_load_schema(psql: Path, host: str, port: int, dbname: str, user: str | None) -> None:
     sql = """
+alter table weather.station
+    add column if not exists local_standard_utc_offset_hours integer;
+update weather.station
+set local_standard_utc_offset_hours = greatest(-12, least(14, round(longitude / 15.0)::integer))
+where local_standard_utc_offset_hours is null
+  and longitude is not null;
 create table if not exists weather.noaa_hourly_load_file (
     load_file_id text primary key,
     calculation_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -277,14 +283,21 @@ filtered as (
     where {' and '.join(source_predicates)}
 )
 select
-    station_id,
-    source_year::text as source_year,
-    raw_station_id,
-    local_path,
-    source_file_id,
-    file_size_bytes::text as file_size_bytes,
-    source_basis
+    ranked.station_id,
+    ranked.source_year::text as source_year,
+    ranked.raw_station_id,
+    ranked.local_path,
+    ranked.source_file_id,
+    ranked.file_size_bytes::text as file_size_bytes,
+    ranked.source_basis,
+    coalesce(
+        st.local_standard_utc_offset_hours,
+        greatest(-12, least(14, round(st.longitude / 15.0)::integer)),
+        0
+    )::text as local_standard_utc_offset_hours
 from filtered ranked
+join weather.station st
+  on st.station_id = ranked.station_id
 where true
   {loaded_filter}
 order by source_year desc, source_priority, station_id, local_path
@@ -344,6 +357,17 @@ def canonical_hour(dt: datetime) -> datetime:
     return dt.replace(minute=0, second=0, microsecond=0)
 
 
+def parse_int(value: object, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def local_hour_from_utc(hour_ending_utc: datetime, offset_hours: int) -> datetime:
+    return (hour_ending_utc + timedelta(hours=offset_hours)).replace(tzinfo=None)
+
+
 def parse_tmp(tmp: str) -> tuple[float | None, str | None]:
     if not tmp:
         return None, None
@@ -389,6 +413,7 @@ def parse_file(
     path = Path(row["local_path"])
     station_id = row["station_id"]
     source_year = int(row["source_year"])
+    local_offset_hours = parse_int(row.get("local_standard_utc_offset_hours"), 0)
     raw_station_id = row["raw_station_id"]
     source_file_id = row.get("source_file_id") or None
     file_size_bytes = int(row["file_size_bytes"]) if row.get("file_size_bytes") else None
@@ -415,7 +440,7 @@ def parse_file(
         "min_hour_ending_utc": None,
         "max_hour_ending_utc": None,
         "error_message": None,
-        "notes": "DJF rows loaded from NOAA Global Hourly CSV using canonical hour = observation timestamp floored to the UTC hour.",
+        "notes": "DJF rows loaded from NOAA Global Hourly CSV using station-local standard-time month filtering and canonical UTC station-hours.",
     }
     best_by_hour: dict[datetime, dict[str, object]] = {}
     best_score_by_hour: dict[datetime, tuple[int, int, int, int]] = {}
@@ -426,7 +451,11 @@ def parse_file(
             for raw in reader:
                 stats["rows_seen"] = int(stats["rows_seen"]) + 1
                 dt = parse_noaa_datetime(raw.get("DATE", ""))
-                if dt is None or dt.month not in DJF_MONTHS:
+                if dt is None:
+                    continue
+                hour = canonical_hour(dt)
+                local_hour = local_hour_from_utc(hour, local_offset_hours)
+                if local_hour.month not in DJF_MONTHS:
                     continue
                 stats["djf_rows_seen"] = int(stats["djf_rows_seen"]) + 1
 
@@ -445,19 +474,19 @@ def parse_file(
                     continue
                 stats["valid_temp_rows"] = int(stats["valid_temp_rows"]) + 1
 
-                hour = canonical_hour(dt)
                 quality_flags = "|".join(
                     [
                         f"tmp_quality:{tmp_quality or ''}",
                         f"report_type:{report_type}",
                         f"source:{noaa_source}",
                         f"qc:{raw.get('QUALITY_CONTROL') or ''}",
+                        f"local_standard_utc_offset_hours:{local_offset_hours}",
                     ]
                 )
                 record = {
                     "station_id": station_id,
                     "hour_ending_utc": hour.isoformat(timespec="seconds"),
-                    "hour_local": None,
+                    "hour_local": local_hour.isoformat(timespec="seconds"),
                     "dry_bulb_c": f"{temp_c:.3f}",
                     "dry_bulb_f": f"{(temp_c * 9.0 / 5.0) + 32.0:.3f}",
                     "source_file_id": source_file_id,
@@ -591,6 +620,39 @@ create temp table stg_hourly_djf (
 """,
             copy_command("stg_hourly_djf", hourly_cols, staging_dir / "hourly_djf.csv"),
             """
+create temp table stg_hourly_rebuild_audit as
+select
+    staged.station_id,
+    staged.hour_ending_utc,
+    existing.station_id is null as needs_insert,
+    existing.station_id is not null
+      and existing.hour_local is distinct from staged.hour_local as needs_hour_local_update,
+    existing.station_id is not null
+      and (
+          existing.dry_bulb_c is distinct from staged.dry_bulb_c
+          or existing.dry_bulb_f is distinct from staged.dry_bulb_f
+      ) as payload_differs,
+    existing.station_id is not null
+      and (
+          existing.source_file_id is distinct from staged.source_file_id
+          or existing.quality_flags is distinct from array_remove(string_to_array(staged.quality_flags_text, '|'), '')
+      ) as metadata_differs
+from stg_hourly_djf staged
+left join weather.hourly_djf existing
+  on existing.station_id = staged.station_id
+ and existing.hour_ending_utc = staged.hour_ending_utc;
+""",
+            f"""
+update audit.calculation_run
+set parameters_json = parameters_json || jsonb_build_object(
+    'hourly_needs_insert_count', (select count(*) from stg_hourly_rebuild_audit where needs_insert),
+    'hourly_needs_hour_local_update_count', (select count(*) from stg_hourly_rebuild_audit where needs_hour_local_update),
+    'hourly_existing_payload_diff_count', (select count(*) from stg_hourly_rebuild_audit where payload_differs),
+    'hourly_existing_metadata_diff_count', (select count(*) from stg_hourly_rebuild_audit where metadata_differs)
+)
+where calculation_run_id = {sql_literal(run_id)};
+""",
+            """
 insert into weather.hourly_djf (
     station_id,
     hour_ending_utc,
@@ -602,22 +664,37 @@ insert into weather.hourly_djf (
     calculation_run_id
 )
 select
-    station_id,
-    hour_ending_utc,
-    hour_local,
-    dry_bulb_c,
-    dry_bulb_f,
-    source_file_id,
-    array_remove(string_to_array(quality_flags_text, '|'), ''),
-    calculation_run_id
-from stg_hourly_djf
-on conflict (station_id, hour_ending_utc) do update set
-    hour_local = excluded.hour_local,
-    dry_bulb_c = excluded.dry_bulb_c,
-    dry_bulb_f = excluded.dry_bulb_f,
-    source_file_id = excluded.source_file_id,
-    quality_flags = excluded.quality_flags,
-    calculation_run_id = excluded.calculation_run_id;
+    staged.station_id,
+    staged.hour_ending_utc,
+    staged.hour_local,
+    staged.dry_bulb_c,
+    staged.dry_bulb_f,
+    staged.source_file_id,
+    array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
+    staged.calculation_run_id
+from stg_hourly_djf staged
+join stg_hourly_rebuild_audit audit
+  on audit.station_id = staged.station_id
+ and audit.hour_ending_utc = staged.hour_ending_utc
+where audit.needs_insert
+on conflict (station_id, hour_ending_utc) do nothing;
+""",
+            """
+update weather.hourly_djf existing
+set
+    hour_local = staged.hour_local,
+    dry_bulb_c = staged.dry_bulb_c,
+    dry_bulb_f = staged.dry_bulb_f,
+    source_file_id = staged.source_file_id,
+    quality_flags = array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
+    calculation_run_id = staged.calculation_run_id
+from stg_hourly_djf staged
+join stg_hourly_rebuild_audit audit
+  on audit.station_id = staged.station_id
+ and audit.hour_ending_utc = staged.hour_ending_utc
+where existing.station_id = staged.station_id
+  and existing.hour_ending_utc = staged.hour_ending_utc
+  and audit.payload_differs;
 """,
             """
 create temp table stg_noaa_hourly_load_file (
@@ -715,13 +792,19 @@ on conflict (station_id, source_year, local_path) do update set
     error_message = excluded.error_message,
     notes = excluded.notes;
 """,
-            """
+            "" if params.get("skip_summary_refresh") else """
 create temp table stg_touched_station_year as
+select distinct
+    station_id,
+    extract(year from hour_local)::integer as source_year
+from stg_hourly_djf
+where hour_local is not null
+union
 select distinct station_id, source_year
 from stg_noaa_hourly_load_file
 where file_status = 'loaded';
 """,
-            """
+            "" if params.get("skip_summary_refresh") else """
 insert into weather.station_year_hourly_summary (
     station_id,
     source_year,
@@ -738,12 +821,34 @@ select
     min(hourly.hour_ending_utc) as min_hour_ending_utc,
     max(hourly.hour_ending_utc) as max_hour_ending_utc,
     now() as refreshed_at_utc,
-    'weather.hourly_djf canonical DJF rows refreshed by load_noaa_hourly_djf.py' as source_basis
+    'weather.hourly_djf canonical station-local DJF rows refreshed by load_noaa_hourly_djf.py' as source_basis
 from stg_touched_station_year touched
+join weather.station station
+  on station.station_id = touched.station_id
 left join weather.hourly_djf hourly
   on hourly.station_id = touched.station_id
- and hourly.hour_ending_utc >= make_timestamptz(touched.source_year, 1, 1, 0, 0, 0.0, 'UTC')
- and hourly.hour_ending_utc < make_timestamptz(touched.source_year + 1, 1, 1, 0, 0, 0.0, 'UTC')
+ and (
+      (
+          hourly.hour_ending_utc >= (
+              make_timestamp(touched.source_year, 1, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+          and hourly.hour_ending_utc < (
+              make_timestamp(touched.source_year, 3, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+      )
+      or (
+          hourly.hour_ending_utc >= (
+              make_timestamp(touched.source_year, 12, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+          and hourly.hour_ending_utc < (
+              make_timestamp(touched.source_year + 1, 1, 1, 0, 0, 0)
+              - make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0))
+          ) at time zone 'UTC'
+      )
+ )
 group by touched.station_id, touched.source_year
 on conflict (station_id, source_year) do update set
     valid_djf_hours = excluded.valid_djf_hours,
@@ -865,6 +970,7 @@ def render_report(
         f"- Limit files: `{params['limit_files']}`",
         f"- Rejected NOAA source codes: `{params['reject_source_codes']}`",
         f"- Plausible temperature range C: `{params['min_temp_c']}` to `{params['max_temp_c']}`",
+        f"- Timestamp policy: `{params['timestamp_policy']}`",
         f"- Years represented: `{years[0] if years else None}-{years[-1] if years else None}`",
         "",
         "## Results",
@@ -901,7 +1007,7 @@ def render_report(
             "- Configured rejected NOAA source codes are excluded before TMP interpretation.",
             "- Rows outside the configured C range are excluded as physically implausible for canonical ECWT weather input.",
             "- Multiple valid observations in the same station-hour are collapsed to one canonical hour using quality, report type, and closeness to minute 56.",
-            "- The timestamp policy for this run is: canonical hour = NOAA observation timestamp floored to the UTC hour.",
+            "- The timestamp policy for this run is: DJF month filtering uses station-local standard time derived from station longitude; canonical storage remains UTC.",
             "- This is now a canonical-load candidate, but final compliance publication still depends on station selection and ECWT method validation.",
         ]
     )
@@ -946,6 +1052,11 @@ def main() -> int:
         action="store_true",
         help="Run expensive exact weather.hourly_djf count(*) validations in the report.",
     )
+    parser.add_argument(
+        "--skip-summary-refresh",
+        action="store_true",
+        help="Defer weather.station_year_hourly_summary refresh; useful for bulk reloads that run a full summary backfill afterward.",
+    )
     args = parser.parse_args()
 
     if not args.psql.exists():
@@ -958,7 +1069,7 @@ def main() -> int:
     target_station_years = read_target_station_years(args.station_year_csv, args.station_year_gap_cause)
 
     code_commit = git_commit_label(args.project_root)
-    run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
+    run_timestamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
     run_id = f"noaa_hourly_djf_load_{run_timestamp}"
     staging_dir = args.staging_root / run_id
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -1029,8 +1140,12 @@ def main() -> int:
         "max_temp_c": args.max_temp_c,
         "file_count": len(file_rows),
         "hourly_rows_staged": len(hourly_rows),
+        "skip_summary_refresh": args.skip_summary_refresh,
         "tmp_units": "NOAA TMP tenths of degrees C converted to C and F",
-        "timestamp_policy": "canonical hour = NOAA observation timestamp floored to UTC hour",
+        "timestamp_policy": (
+            "DJF month filtering uses station-local standard time derived from weather.station.local_standard_utc_offset_hours; "
+            "canonical hour_ending_utc remains the NOAA observation timestamp floored to the UTC hour"
+        ),
         "no_candidate_files_selected": not bool(file_rows),
     }
     load_sql = build_load_sql(staging_dir, run_id, code_commit, params)

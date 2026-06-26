@@ -45,6 +45,10 @@ The 2025 early release is available for comparison/currentness but should remain
 - `docs/eia860_asset_inventory.md`: generated inventory report for the plant/generator universe.
 - `scripts/build_eia860_asset_inventory.py`: reproducible EIA-860 extractor and auditor.
 
+Generated run products such as timestamped CSVs, release extracts, per-run QA reports,
+and `data/processed/*` files are local artifacts by default. Publish them as release
+bundles with checksums when they need to be shared; do not commit them to repo history.
+
 ## Publication Model
 
 GitHub is the audit/control plane for this project, not the heavy weather-data warehouse.
@@ -52,7 +56,7 @@ GitHub is the audit/control plane for this project, not the heavy weather-data w
 - Commit code, schemas, methodology, manifests, checksums, QA reports, and small previews.
 - Keep heavyweight NOAA hourly data and working databases under `EOP012_DATA_ROOT` or another external cache.
 - Publish versioned release bundles with checksums and enough provenance to reproduce every ECWT value.
-- Never commit large raw ZIPs, Postgres clusters, DuckDB files, Parquet bundles, or generated data directories directly to Git.
+- Never commit large raw ZIPs, Postgres clusters, DuckDB files, Parquet bundles, generated CSV runs, release extracts, or generated data directories directly to Git.
 
 See:
 

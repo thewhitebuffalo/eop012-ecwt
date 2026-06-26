@@ -128,6 +128,7 @@ create table if not exists weather.station (
     elevation_m numeric,
     state text,
     country text,
+    local_standard_utc_offset_hours integer,
     first_observation_utc timestamptz,
     last_observation_utc timestamptz,
     source_file_id text references audit.source_file(source_file_id),

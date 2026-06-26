@@ -10,5 +10,15 @@
 __pycache__/
 data/raw/
 data/processed/*
-!data/processed/scoped_plant_ecwt_release_*.csv
+data/rebuild_chunks/
 db/
+
+# Generated run products. Keep release bundles outside repo history and publish
+# them through GitHub Releases or external object storage with checksums.
+docs/*.csv
+docs/*T*Z*.md
+docs/scoped_plant_ecwt_release_*_manifest.json
+docs/noaa_backfill_download_batch*_report.md
+
+# Generated visualization output (publish via Pages/Release, not git)
+build/

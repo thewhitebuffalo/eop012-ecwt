@@ -16,7 +16,7 @@ from build_station_selection_review import build_sql as build_review_gate_sql
 from build_station_selection_review import count_query
 from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 VALID_REVIEW_STATUSES = {"accepted", "needs_review", "rejected"}
 VALID_REVIEW_BASES = {"manual_review", "policy_override"}
 
@@ -221,7 +221,7 @@ select
     round(sc.distance_km, 3)::text as selected_distance_km,
     sc.rank_order::text as selected_rank_order,
     round(r.coverage_ratio, 6)::text as coverage_ratio,
-    round(pe.governing_ecwt_f, 3)::text as governing_ecwt_f,
+    round(pe.governing_ecwt_f, 1)::text as governing_ecwt_f,
     sr.review_status as current_review_status,
     sr.review_basis as current_review_basis,
     coalesce(sr.reviewer, '') as current_reviewer,

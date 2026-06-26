@@ -17,7 +17,7 @@ from pathlib import Path
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 COVERAGE_POLICY = "normalized_active_window_coverage"
 DEFAULT_PLANT_SCOPE = "first-operable"
 TARGET_CLASS = "still_fails_normalized_active_window_coverage"

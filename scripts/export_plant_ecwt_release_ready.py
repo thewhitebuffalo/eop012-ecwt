@@ -15,7 +15,7 @@ from typing import Iterable
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 
 
 def utc_now() -> datetime:
@@ -194,18 +194,21 @@ def export_rows(
             round(sc.distance_km, 3)::text as selected_distance_km,
             round(sc.elevation_delta_m, 3)::text as selected_elevation_delta_m,
             sc.rank_order::text as selected_rank_order,
-            round(pe.ecwt_f, 3)::text as ecwt_f,
-            round(pe.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
-            round(pe.governing_ecwt_f, 3)::text as governing_ecwt_f,
+            round(pe.ecwt_f, 1)::text as ecwt_f,
+            round(pe.ecwt_discrete_f, 1)::text as ecwt_discrete_f,
+            round(pe.governing_ecwt_f, 1)::text as governing_ecwt_f,
             pe.valid_hour_count::text as valid_hour_count,
             pe.expected_hour_count::text as expected_hour_count,
             pe.missing_hour_count::text as missing_hour_count,
             pe.duplicate_hour_count::text as duplicate_hour_count,
             round(r.coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_2000_to_calculation_cutoff'::text as coverage_basis,
             pe.percentile_target::text as percentile_target,
             pe.calculation_cutoff_utc::text as calculation_cutoff_utc,
             r.min_valid_hour_threshold::text as min_valid_hour_threshold,
             round(r.min_coverage_ratio_threshold, 6)::text as min_coverage_ratio_threshold,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'Release-ready analytical preview; not a Generator Owner EOP-012 compliance filing input without entity-specific representativeness review and source QA acceptance.'::text as publication_caveat,
             r.readiness_status,
             r.reason_code as readiness_reason_code,
             rr.release_status,
@@ -335,6 +338,8 @@ def render_report(
             "- This is a preview export of rows that passed fixed-period readiness and station-selection review.",
             "- It is narrower than the publication-candidate export because it uses `publish.plant_ecwt_release_readiness`.",
             "- The CSV intentionally excludes blocked readiness rows and station-review-blocked rows.",
+            "- ECWT values are rounded to 0.1 F to avoid false precision relative to NOAA TMP tenths-C source resolution.",
+            "- Each row carries `coverage_basis`, `ecwt_precision_basis`, and `publication_caveat` fields for downstream audit context.",
             "- For a national release, remaining blocked rows require additional weather coverage or explicit station-selection policy decisions.",
             "",
         ]
@@ -407,10 +412,13 @@ def main() -> None:
         "missing_hour_count",
         "duplicate_hour_count",
         "coverage_ratio",
+        "coverage_basis",
         "percentile_target",
         "calculation_cutoff_utc",
         "min_valid_hour_threshold",
         "min_coverage_ratio_threshold",
+        "ecwt_precision_basis",
+        "publication_caveat",
         "readiness_status",
         "readiness_reason_code",
         "release_status",

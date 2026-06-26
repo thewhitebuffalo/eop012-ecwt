@@ -16,9 +16,13 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_"
-DEFAULT_SECONDARY_PREFIX = "secondary_station_fill_ecwt_"
+DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_fixed_period_current_gate_"
 DEFAULT_STATION_ECWT_PREFIX = "station_ecwt_loaded_"
+RELEASE_POLICY_ID = "fixed_period_current_gate"
+RELEASE_POLICY_SUITABILITY = "current_conservative_gate"
+MIN_FIXED_COVERAGE_RATIO = 0.95
+MIN_VALID_HOUR_COUNT = 30000
+MAX_PRIMARY_STATION_DISTANCE_KM = 100.0
 
 EXPORT_FIELDS = [
     "release_id",
@@ -58,7 +62,11 @@ EXPORT_FIELDS = [
     "expected_hour_count",
     "missing_hour_count",
     "coverage_ratio",
+    "coverage_basis",
     "percentile_target",
+    "ecwt_precision_basis",
+    "selected_station_representativeness_basis",
+    "publication_caveat",
     "readiness_status",
     "reason_code",
     "notes",
@@ -178,10 +186,218 @@ def latest_successful_run_id(
     return run_id
 
 
+def latest_secondary_fill_run_id(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    policy_result_run_id: str,
+) -> str | None:
+    run_id = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select sf.secondary_fill_run_id
+        from calc.plant_ecwt_secondary_fill sf
+        join audit.calculation_run cr
+          on cr.calculation_run_id = sf.secondary_fill_run_id
+        where sf.policy_result_run_id = {sql_literal(policy_result_run_id)}
+          and sf.fill_status = 'passes_composite_fill'
+          and cr.run_status = 'succeeded'
+        group by sf.secondary_fill_run_id, cr.run_started_at_utc
+        order by cr.run_started_at_utc desc nulls last, sf.secondary_fill_run_id desc
+        limit 1
+        """,
+    )
+    return run_id or None
+
+
+def validate_policy_result_run(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    policy_result_run_id: str,
+) -> None:
+    summary = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select
+            coalesce(policy_id, '') as policy_id,
+            coalesce(policy_suitability, '') as policy_suitability,
+            readiness_status,
+            reason_code,
+            coalesce(candidate_source, '') as candidate_source,
+            count(*)::text as rows
+        from calc.plant_ecwt_policy_result
+        where policy_result_run_id = {sql_literal(policy_result_run_id)}
+        group by policy_id, policy_suitability, readiness_status, reason_code, candidate_source
+        order by rows desc
+        """,
+    )
+    if not summary:
+        raise RuntimeError(f"Policy result run {policy_result_run_id!r} has no rows.")
+
+    policy_ids = {row["policy_id"] for row in summary}
+    suitability = {row["policy_suitability"] for row in summary}
+    if policy_ids != {RELEASE_POLICY_ID}:
+        raise RuntimeError(
+            "Scoped release export requires fixed-period policy "
+            f"{RELEASE_POLICY_ID!r}; got {sorted(policy_ids)} for {policy_result_run_id}."
+        )
+    if suitability - {"", RELEASE_POLICY_SUITABILITY}:
+        raise RuntimeError(
+            "Scoped release export requires current conservative policy suitability; "
+            f"got {sorted(suitability)} for {policy_result_run_id}."
+        )
+
+    bad_candidates = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select count(*)
+        from calc.plant_ecwt_policy_result
+        where policy_result_run_id = {sql_literal(policy_result_run_id)}
+          and readiness_status = 'publication_candidate'
+          and (
+            policy_id <> {sql_literal(RELEASE_POLICY_ID)}
+            or reason_code <> 'passes_current_fixed_period_gate'
+            or candidate_source <> 'current_fixed_period_publication_candidate'
+            or fixed_coverage_ratio is null
+            or fixed_coverage_ratio < {MIN_FIXED_COVERAGE_RATIO}
+            or coverage_ratio is null
+            or coverage_ratio < {MIN_FIXED_COVERAGE_RATIO}
+            or valid_hour_count is null
+            or valid_hour_count < {MIN_VALID_HOUR_COUNT}
+            or selected_station_distance_km is null
+            or selected_station_distance_km > {MAX_PRIMARY_STATION_DISTANCE_KM}
+          )
+        """,
+    )
+    if int(bad_candidates or "0") > 0:
+        raise RuntimeError(
+            f"Policy result run {policy_result_run_id} contains {bad_candidates} publication_candidate "
+            "rows that fail the fixed-period release guards."
+        )
+
+
+def validate_secondary_fill_run(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    policy_result_run_id: str,
+    secondary_fill_run_id: str | None,
+) -> None:
+    if not secondary_fill_run_id:
+        return
+    mismatch_rows = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select count(*)
+        from calc.plant_ecwt_secondary_fill
+        where secondary_fill_run_id = {sql_literal(secondary_fill_run_id)}
+          and policy_result_run_id <> {sql_literal(policy_result_run_id)}
+        """,
+    )
+    if int(mismatch_rows or "0") > 0:
+        raise RuntimeError(
+            f"Secondary fill run {secondary_fill_run_id} is tied to a different policy result run."
+        )
+
+    bad_fill_rows = psql_scalar(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select count(*)
+        from calc.plant_ecwt_secondary_fill
+        where secondary_fill_run_id = {sql_literal(secondary_fill_run_id)}
+          and policy_result_run_id = {sql_literal(policy_result_run_id)}
+          and fill_status = 'passes_composite_fill'
+          and (
+            primary_station_distance_km is null
+            or primary_station_distance_km > {MAX_PRIMARY_STATION_DISTANCE_KM}
+            or composite_coverage_ratio is null
+            or composite_coverage_ratio < {MIN_FIXED_COVERAGE_RATIO}
+            or composite_valid_hour_count is null
+            or composite_valid_hour_count < {MIN_VALID_HOUR_COUNT}
+          )
+        """,
+    )
+    if int(bad_fill_rows or "0") > 0:
+        raise RuntimeError(
+            f"Secondary fill run {secondary_fill_run_id} contains {bad_fill_rows} rows that fail "
+            "fixed-composite release guards."
+        )
+
+
+def float_value(value: str | None) -> float | None:
+    if value in (None, "", r"\N"):
+        return None
+    return float(str(value))
+
+
+def int_value(value: str | None) -> int | None:
+    if value in (None, "", r"\N"):
+        return None
+    return int(str(value))
+
+
+def validate_export_rows(rows: list[dict[str, str]]) -> None:
+    violations: list[str] = []
+    for row in rows:
+        method_source = row.get("method_source", "")
+        primary_distance = float_value(row.get("primary_station_distance_km"))
+        coverage_ratio = float_value(row.get("coverage_ratio"))
+        valid_hours = int_value(row.get("valid_hour_count"))
+        if primary_distance is None or primary_distance > MAX_PRIMARY_STATION_DISTANCE_KM:
+            violations.append(f"{row.get('plant_id')}: primary station distance {primary_distance}")
+        if coverage_ratio is None or coverage_ratio < MIN_FIXED_COVERAGE_RATIO:
+            violations.append(f"{row.get('plant_id')}: coverage ratio {coverage_ratio}")
+        if valid_hours is None or valid_hours < MIN_VALID_HOUR_COUNT:
+            violations.append(f"{row.get('plant_id')}: valid DJF hours {valid_hours}")
+        if method_source == "policy_result":
+            if row.get("reason_code") != "passes_current_fixed_period_gate":
+                violations.append(f"{row.get('plant_id')}: policy reason {row.get('reason_code')}")
+            if row.get("coverage_basis") != "fixed_period_station_local_djf_2000_to_calculation_cutoff":
+                violations.append(f"{row.get('plant_id')}: coverage basis {row.get('coverage_basis')}")
+        elif method_source == "secondary_station_fill":
+            if row.get("reason_code") != "passes_secondary_station_fill":
+                violations.append(f"{row.get('plant_id')}: secondary reason {row.get('reason_code')}")
+            if row.get("coverage_basis") != "fixed_period_station_local_djf_composite_2000_to_calculation_cutoff":
+                violations.append(f"{row.get('plant_id')}: coverage basis {row.get('coverage_basis')}")
+        else:
+            violations.append(f"{row.get('plant_id')}: method source {method_source}")
+
+    if violations:
+        sample = "; ".join(violations[:10])
+        raise RuntimeError(f"Scoped export rows failed release guard validation: {sample}")
+
+
 def export_query(
     release_id: str,
     policy_result_run_id: str,
-    secondary_fill_run_id: str,
+    secondary_fill_run_id: str | None,
     station_ecwt_run_id: str,
 ) -> str:
     return f"""
@@ -218,13 +434,19 @@ def export_query(
             null::text as fallback_station_country,
             null::text as fallback_station_distance_km,
             null::text as fallback_station_rank_order,
-            round(pr.ecwt_f, 3)::text as ecwt_f,
-            round(se.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
+            round(pr.ecwt_f, 1)::text as ecwt_f,
+            round(se.ecwt_discrete_f, 1)::text as ecwt_discrete_f,
             pr.valid_hour_count::text as valid_hour_count,
             pr.expected_hour_count::text as expected_hour_count,
             greatest(pr.expected_hour_count - pr.valid_hour_count, 0)::text as missing_hour_count,
             round(pr.coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_2000_to_calculation_cutoff'::text as coverage_basis,
             '0.002'::text as percentile_target,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'automated_gate_distance_100km_elevation_300m_fixed_coverage_0.95'::text
+                as selected_station_representativeness_basis,
+            'Analytical plant-level ECWT output; not a Generator Owner EOP-012 compliance filing input without station representativeness review and source QA acceptance.'::text
+                as publication_caveat,
             pr.readiness_status,
             pr.reason_code,
             pr.notes
@@ -234,8 +456,16 @@ def export_query(
           on se.calculation_run_id = {sql_literal(station_ecwt_run_id)}
          and se.station_id = pr.selected_station_id
         where pr.policy_result_run_id = {sql_literal(policy_result_run_id)}
+          and pr.policy_id = {sql_literal(RELEASE_POLICY_ID)}
           and pr.plant_state <> 'AK'
           and pr.readiness_status = 'publication_candidate'
+          and pr.reason_code = 'passes_current_fixed_period_gate'
+          and pr.candidate_source = 'current_fixed_period_publication_candidate'
+          and pr.fixed_coverage_ratio >= {MIN_FIXED_COVERAGE_RATIO}
+          and pr.coverage_ratio >= {MIN_FIXED_COVERAGE_RATIO}
+          and pr.valid_hour_count >= {MIN_VALID_HOUR_COUNT}
+          and pr.selected_station_distance_km is not null
+          and pr.selected_station_distance_km <= {MAX_PRIMARY_STATION_DISTANCE_KM}
     ),
     secondary_fill as (
         select
@@ -270,20 +500,31 @@ def export_query(
             sf.fallback_station_country,
             round(sf.fallback_station_distance_km, 3)::text as fallback_station_distance_km,
             sf.fallback_station_rank_order::text as fallback_station_rank_order,
-            round(sf.composite_ecwt_f, 3)::text as ecwt_f,
-            round(sf.composite_ecwt_discrete_f, 3)::text as ecwt_discrete_f,
+            round(sf.composite_ecwt_f, 1)::text as ecwt_f,
+            round(sf.composite_ecwt_discrete_f, 1)::text as ecwt_discrete_f,
             sf.composite_valid_hour_count::text as valid_hour_count,
             sf.generated_expected_hour_count::text as expected_hour_count,
             greatest(sf.generated_expected_hour_count - sf.composite_valid_hour_count, 0)::text as missing_hour_count,
             round(sf.composite_coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_composite_2000_to_calculation_cutoff'::text as coverage_basis,
             sf.percentile_target::text as percentile_target,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'documented_secondary_station_fill_with_primary_station_retained'::text
+                as selected_station_representativeness_basis,
+            'Analytical plant-level ECWT output; secondary-fill rows require review of station representativeness, missing-hour treatment, and source QA before compliance use.'::text
+                as publication_caveat,
             'publication_candidate'::text as readiness_status,
             'passes_secondary_station_fill'::text as reason_code,
             sf.notes
         from calc.plant_ecwt_secondary_fill sf
         join asset.plant p using (plant_id)
         where sf.secondary_fill_run_id = {sql_literal(secondary_fill_run_id)}
+          and sf.policy_result_run_id = {sql_literal(policy_result_run_id)}
           and sf.fill_status = 'passes_composite_fill'
+          and sf.primary_station_distance_km is not null
+          and sf.primary_station_distance_km <= {MAX_PRIMARY_STATION_DISTANCE_KM}
+          and sf.composite_coverage_ratio >= {MIN_FIXED_COVERAGE_RATIO}
+          and sf.composite_valid_hour_count >= {MIN_VALID_HOUR_COUNT}
     )
     select *
     from (
@@ -345,7 +586,7 @@ def render_report(
     path: Path,
     release_id: str,
     policy_result_run_id: str,
-    secondary_fill_run_id: str,
+    secondary_fill_run_id: str | None,
     station_ecwt_run_id: str,
     export_rows: list[dict[str, str]],
     exclusion_rows: list[dict[str, str]],
@@ -367,7 +608,9 @@ def render_report(
         "",
         "## Scope",
         "",
-        "This export includes non-Alaska plant rows that are publication-ready under the normalized active-window loaded-year policy, plus rows made publication-ready by the documented secondary-station fill method. It excludes Alaska and the reviewed no-station edge cases from the current publication denominator.",
+        "This export includes non-Alaska plant rows that are publication-ready under the fixed-period current gate, plus rows made publication-ready by the documented secondary-station fill method. It excludes Alaska and the reviewed no-station edge cases from the current publication denominator.",
+        "",
+        "ECWT values are rounded to 0.1 F because the NOAA Global Hourly TMP source field is stored in tenths of a degree C. Each exported row carries `coverage_basis`, `ecwt_precision_basis`, `selected_station_representativeness_basis`, and `publication_caveat` fields so downstream users see the audit caveats in the CSV itself.",
         "",
         "## Row Counts",
         "",
@@ -427,8 +670,14 @@ def main() -> int:
     policy_result_run_id = args.policy_result_run_id or latest_successful_run_id(
         args.psql, args.host, args.port, args.dbname, args.user, DEFAULT_POLICY_PREFIX
     )
-    secondary_fill_run_id = args.secondary_fill_run_id or latest_successful_run_id(
-        args.psql, args.host, args.port, args.dbname, args.user, DEFAULT_SECONDARY_PREFIX
+    validate_policy_result_run(args.psql, args.host, args.port, args.dbname, args.user, policy_result_run_id)
+    secondary_fill_run_id = args.secondary_fill_run_id
+    if not secondary_fill_run_id:
+        secondary_fill_run_id = latest_secondary_fill_run_id(
+            args.psql, args.host, args.port, args.dbname, args.user, policy_result_run_id
+        )
+    validate_secondary_fill_run(
+        args.psql, args.host, args.port, args.dbname, args.user, policy_result_run_id, secondary_fill_run_id
     )
     station_ecwt_run_id = args.station_ecwt_run_id or latest_successful_run_id(
         args.psql, args.host, args.port, args.dbname, args.user, DEFAULT_STATION_ECWT_PREFIX
@@ -452,6 +701,7 @@ def main() -> int:
     )
     if not rows:
         raise RuntimeError("Scoped export produced zero rows.")
+    validate_export_rows(rows)
 
     processed_dir = args.project_root / "data" / "processed"
     docs_dir = args.project_root / "docs"

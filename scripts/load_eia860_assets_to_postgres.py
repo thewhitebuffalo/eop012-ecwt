@@ -24,7 +24,7 @@ from eop012_config import EIA860_ZIP, PROJECT_ROOT, PSQL, STAGING_ROOT
 RAW_ZIP = EIA860_ZIP
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed" / "eia8602024"
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_YEAR = 2024
 SOURCE_RELEASE = "eia8602024"
 EIA_URL = "https://www.eia.gov/electricity/data/eia860/xls/eia8602024.zip"

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 
 
 def utc_now() -> datetime:
@@ -514,8 +514,8 @@ def report_counts(psql: Path, host: str, port: int, dbname: str, run_id: str, us
             ("plant ECWT rows", f"select count(*) from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)};"),
             ("provisional plant ECWT rows", f"select count(*) from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)} and result_status = 'provisional';"),
             ("blocked plant ECWT rows", f"select count(*) from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)} and result_status = 'blocked';"),
-            ("minimum plant ECWT F", f"select coalesce(round(min(ecwt_f), 3)::text, '') from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)};"),
-            ("maximum plant ECWT F", f"select coalesce(round(max(ecwt_f), 3)::text, '') from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)};"),
+            ("minimum plant ECWT F", f"select coalesce(round(min(ecwt_f), 1)::text, '') from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)};"),
+            ("maximum plant ECWT F", f"select coalesce(round(max(ecwt_f), 1)::text, '') from calc.plant_ecwt where calculation_run_id = {sql_literal(run_id)};"),
         ]
     )
     rows = OrderedDict()
@@ -686,7 +686,7 @@ def main() -> int:
             p.state,
             seg.station_id,
             pe.valid_hour_count,
-            round(pe.ecwt_f, 3) as ecwt_f,
+            round(pe.ecwt_f, 1) as ecwt_f,
             pe.result_status
         from calc.plant_ecwt pe
         join asset.plant p using (plant_id)

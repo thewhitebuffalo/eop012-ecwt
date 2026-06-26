@@ -24,7 +24,7 @@ from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "noaa_global_hourly_csv"
 USER_AGENT = "eop012-ecwt-audit/0.1"
 DOWNLOAD_STATUS_VALUES = ("downloaded", "skipped_existing", "missing_on_aws", "failed_http", "failed_exception", "dry_run")

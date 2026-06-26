@@ -18,11 +18,16 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "secondary_station_fill_ecwt"
-DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_normalized_active_window_loaded_year_"
+DEFAULT_POLICY_PREFIX = "plant_ecwt_policy_result_all_plants_fixed_period_current_gate_"
 DEFAULT_CANDIDATE_PREFIX = "noaa_station_candidates_"
 DEFAULT_STATION_ECWT_PREFIX = "station_ecwt_loaded_"
+FIXED_PERIOD_FILL_REASON_CODES = (
+    "fixed_period_coverage_below_threshold",
+    "fixed_period_coverage_and_loaded_years_below_threshold",
+)
+MAX_PRIMARY_STATION_DISTANCE_KM = 100.0
 
 BEST_FIELDS = [
     "secondary_fill_id",
@@ -293,29 +298,49 @@ def score_query(
             pr.selected_station_country as primary_station_country,
             pr.selected_station_distance_km as primary_station_distance_km,
             pr.selected_station_rank_order as primary_station_rank_order,
+            pst.local_standard_utc_offset_hours as primary_local_standard_utc_offset_hours,
             pr.ecwt_f as primary_ecwt_f,
             pr.valid_hour_count as policy_primary_valid_hour_count,
             pr.expected_hour_count as policy_expected_hour_count,
             pr.coverage_ratio as policy_primary_coverage_ratio
         from calc.plant_ecwt_policy_result pr
         join asset.plant p using (plant_id)
+        join weather.station pst
+          on pst.station_id = pr.selected_station_id
         where pr.policy_result_run_id = {sql_literal(policy_result_run_id)}
           and pr.readiness_status = 'blocked'
-          and pr.reason_code = 'normalized_active_window_coverage_below_threshold'
+          and pr.policy_id = 'fixed_period_current_gate'
+          and pr.reason_code in ({sql_list(FIXED_PERIOD_FILL_REASON_CODES)})
           and pr.selected_station_id is not null
+          and pr.selected_station_distance_km is not null
+          and pr.selected_station_distance_km <= {MAX_PRIMARY_STATION_DISTANCE_KM}
           and {state_filter}
           and {plant_filter}
     ),
     primary_year_bounds as (
         select
             t.plant_id,
-            min(extract(year from h.hour_ending_utc at time zone 'UTC'))::integer as min_year,
-            max(extract(year from h.hour_ending_utc at time zone 'UTC'))::integer as max_year
+            min(
+                extract(
+                    year from (h.hour_ending_utc at time zone 'UTC')
+                        + make_interval(hours => coalesce(t.primary_local_standard_utc_offset_hours, 0))
+                )
+            )::integer as min_year,
+            max(
+                extract(
+                    year from (h.hour_ending_utc at time zone 'UTC')
+                        + make_interval(hours => coalesce(t.primary_local_standard_utc_offset_hours, 0))
+                )
+            )::integer as max_year
         from target t
         join weather.hourly_djf h
           on h.station_id = t.primary_station_id
          and h.dry_bulb_f is not null
-        group by t.plant_id
+         and extract(
+             month from (h.hour_ending_utc at time zone 'UTC')
+                 + make_interval(hours => coalesce(t.primary_local_standard_utc_offset_hours, 0))
+         ) in (12, 1, 2)
+        group by t.plant_id, t.primary_local_standard_utc_offset_hours
     ),
     target_with_years as (
         select t.*, y.min_year, y.max_year
@@ -323,15 +348,24 @@ def score_query(
         join primary_year_bounds y using (plant_id)
     ),
     source_years as (
-        select plant_id, generate_series(min_year, max_year)::integer as source_year
+        select
+            plant_id,
+            primary_local_standard_utc_offset_hours,
+            generate_series(min_year, max_year)::integer as source_year
         from target_with_years
     ),
     expected_hour as (
         select
             sy.plant_id,
             generate_series(
-                make_timestamptz(sy.source_year, 1, 1, 0, 0, 0, 'UTC'),
-                make_timestamptz(sy.source_year, 3, 1, 0, 0, 0, 'UTC') - interval '1 hour',
+                (
+                    make_timestamp(sy.source_year, 1, 1, 0, 0, 0)
+                    - make_interval(hours => coalesce(sy.primary_local_standard_utc_offset_hours, 0))
+                ) at time zone 'UTC',
+                (
+                    make_timestamp(sy.source_year, 3, 1, 0, 0, 0)
+                    - make_interval(hours => coalesce(sy.primary_local_standard_utc_offset_hours, 0))
+                ) at time zone 'UTC' - interval '1 hour',
                 interval '1 hour'
             ) as hour_ending_utc
         from source_years sy
@@ -339,8 +373,14 @@ def score_query(
         select
             sy.plant_id,
             generate_series(
-                make_timestamptz(sy.source_year, 12, 1, 0, 0, 0, 'UTC'),
-                make_timestamptz(sy.source_year + 1, 1, 1, 0, 0, 0, 'UTC') - interval '1 hour',
+                (
+                    make_timestamp(sy.source_year, 12, 1, 0, 0, 0)
+                    - make_interval(hours => coalesce(sy.primary_local_standard_utc_offset_hours, 0))
+                ) at time zone 'UTC',
+                (
+                    make_timestamp(sy.source_year + 1, 1, 1, 0, 0, 0)
+                    - make_interval(hours => coalesce(sy.primary_local_standard_utc_offset_hours, 0))
+                ) at time zone 'UTC' - interval '1 hour',
                 interval '1 hour'
             ) as hour_ending_utc
         from source_years sy
@@ -462,6 +502,7 @@ def score_query(
             t.primary_station_country,
             t.primary_station_distance_km,
             t.primary_station_rank_order,
+            t.primary_local_standard_utc_offset_hours,
             t.primary_ecwt_f,
             t.policy_primary_valid_hour_count,
             t.policy_expected_hour_count,
@@ -563,7 +604,7 @@ def score_query(
             when fill_status = 'passes_composite_fill'
                 then 'Composite uses primary station when valid and fills only missing primary hours from fallback station.'
             when fill_status = 'blocked_denominator_mismatch'
-                then 'Generated UTC DJF expected-hour count does not match policy row expected-hour count.'
+                then 'Generated primary-station local-standard DJF expected-hour count does not match policy row expected-hour count.'
             when fill_status = 'blocked_primary_count_mismatch'
                 then 'Recomputed primary valid-hour count does not match policy row valid-hour count.'
             when fill_status = 'blocked_no_missing_hours_filled'
@@ -640,7 +681,7 @@ def render_report(
         "",
         "## Method",
         "",
-        "The selected primary station remains the representative station. For each fallback candidate, the calculation builds the UTC DJF expected-hour set for the primary station's loaded-year window, uses the primary dry-bulb value wherever it exists, fills only missing primary hours from the fallback station, and recalculates ECWT on that composite series.",
+        "The selected primary station remains the representative station. For each fallback candidate, the calculation builds the primary-station local-standard DJF expected-hour set for the primary station's loaded-year window, expresses those hours in UTC for joins, uses the primary dry-bulb value wherever it exists, fills only missing primary hours from the fallback station, and recalculates ECWT on that composite series.",
         "",
         "The chosen fallback is the nearest candidate station that satisfies all of these checks:",
         "",

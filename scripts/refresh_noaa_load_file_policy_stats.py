@@ -21,7 +21,7 @@ from typing import Iterable
 from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT
 from load_noaa_hourly_djf import parse_file
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 DEFAULT_MIN_TEMP_C = -65.0
 DEFAULT_MAX_TEMP_C = 40.0
 DEFAULT_REJECT_SOURCE_CODES = {"7"}

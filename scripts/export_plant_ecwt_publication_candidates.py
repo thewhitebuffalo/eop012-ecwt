@@ -15,7 +15,7 @@ from typing import Iterable
 
 from eop012_config import PROJECT_ROOT, PSQL
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 FIRST_SCOPE_STATUSES = ("OP", "SB", "OA", "OS")
 
 
@@ -195,18 +195,23 @@ def export_rows(
             round(st.elevation_m, 3)::text as selected_station_elevation_m,
             st.first_observation_utc::text as selected_station_first_observation_utc,
             st.last_observation_utc::text as selected_station_last_observation_utc,
-            round(pe.ecwt_f, 3)::text as ecwt_f,
-            round(pe.ecwt_discrete_f, 3)::text as ecwt_discrete_f,
-            round(pe.governing_ecwt_f, 3)::text as governing_ecwt_f,
+            round(r.selected_station_distance_km, 3)::text as selected_station_distance_km,
+            round(r.selected_station_elevation_delta_m, 3)::text as selected_station_elevation_delta_m,
+            round(pe.ecwt_f, 1)::text as ecwt_f,
+            round(pe.ecwt_discrete_f, 1)::text as ecwt_discrete_f,
+            round(pe.governing_ecwt_f, 1)::text as governing_ecwt_f,
             pe.valid_hour_count::text as valid_hour_count,
             pe.expected_hour_count::text as expected_hour_count,
             pe.missing_hour_count::text as missing_hour_count,
             pe.duplicate_hour_count::text as duplicate_hour_count,
             round(r.coverage_ratio, 6)::text as coverage_ratio,
+            'fixed_period_station_local_djf_2000_to_calculation_cutoff'::text as coverage_basis,
             pe.percentile_target::text as percentile_target,
             pe.calculation_cutoff_utc::text as calculation_cutoff_utc,
             r.min_valid_hour_threshold::text as min_valid_hour_threshold,
             round(r.min_coverage_ratio_threshold, 6)::text as min_coverage_ratio_threshold,
+            'rounded_to_0.1_f_due_to_noaa_tmp_tenths_c_source_resolution'::text as ecwt_precision_basis,
+            'Analytical plant-level ECWT preview; not a Generator Owner EOP-012 compliance filing input without station representativeness review and source QA acceptance.'::text as publication_caveat,
             r.readiness_status,
             r.reason_code,
             pe.result_status,
@@ -329,6 +334,8 @@ def render_report(
             "",
             "- This is a preview export of rows that passed the current strict publication gate, not a final compliance release.",
             "- The CSV intentionally excludes provisional low-coverage and blocked rows.",
+            "- ECWT values are rounded to 0.1 F to avoid false precision relative to NOAA TMP tenths-C source resolution.",
+            "- `coverage_basis` and `publication_caveat` are exported with each row so fixed-period denominator and review limits travel with the CSV.",
             "- `first-operable` scope means plants with at least one `OP`, `SB`, `OA`, or `OS` generator status.",
             "- Raw NOAA files and the Postgres database are not included in Git; source lineage and run IDs are retained for reproducibility.",
             "- Before a national release, QA must close out plausibility rejects, warm station ECWT outliers, and station-selection review.",
@@ -409,6 +416,8 @@ def main() -> None:
         "selected_station_elevation_m",
         "selected_station_first_observation_utc",
         "selected_station_last_observation_utc",
+        "selected_station_distance_km",
+        "selected_station_elevation_delta_m",
         "ecwt_f",
         "ecwt_discrete_f",
         "governing_ecwt_f",
@@ -417,10 +426,13 @@ def main() -> None:
         "missing_hour_count",
         "duplicate_hour_count",
         "coverage_ratio",
+        "coverage_basis",
         "percentile_target",
         "calculation_cutoff_utc",
         "min_valid_hour_threshold",
         "min_coverage_ratio_threshold",
+        "ecwt_precision_basis",
+        "publication_caveat",
         "readiness_status",
         "reason_code",
         "result_status",

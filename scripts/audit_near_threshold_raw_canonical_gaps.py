@@ -31,7 +31,7 @@ from load_noaa_hourly_djf import (
 )
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.1.0"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
 SOURCE_FAMILY = "near_threshold_raw_canonical_gap_audit"
 
 
@@ -196,15 +196,22 @@ def ceil_hour(dt: datetime) -> datetime:
     return clean if clean == dt else clean + timedelta(hours=1)
 
 
-def expected_hours_for_window(row: dict[str, str], source_year: int) -> list[datetime]:
+def expected_hours_for_window(row: dict[str, str], source_year: int, offset_hours: int) -> list[datetime]:
     start = parse_ts(row.get("normalized_active_first_utc"))
     end = parse_ts(row.get("normalized_active_last_utc"))
     if start is None or end is None:
         return []
 
+    offset = timedelta(hours=offset_hours)
     segments = (
-        (datetime(source_year, 1, 1, tzinfo=timezone.utc), datetime(source_year, 3, 1, tzinfo=timezone.utc)),
-        (datetime(source_year, 12, 1, tzinfo=timezone.utc), datetime(source_year + 1, 1, 1, tzinfo=timezone.utc)),
+        (
+            datetime(source_year, 1, 1, tzinfo=timezone.utc) - offset,
+            datetime(source_year, 3, 1, tzinfo=timezone.utc) - offset,
+        ),
+        (
+            datetime(source_year, 12, 1, tzinfo=timezone.utc) - offset,
+            datetime(source_year + 1, 1, 1, tzinfo=timezone.utc) - offset,
+        ),
     )
     hours: list[datetime] = []
     for seg_start, seg_end in segments:
@@ -295,13 +302,19 @@ def fetch_canonical_hours(
         user,
         f"""
         select
-            station_id,
-            extract(year from hour_ending_utc at time zone 'UTC')::int::text as source_year,
-            to_char(hour_ending_utc at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as hour_utc
-        from weather.hourly_djf
-        where station_id in ({sql_list(station_ids)})
-          and extract(year from hour_ending_utc at time zone 'UTC')::int between {int(min_year)} and {int(max_year)}
-          and extract(month from hour_ending_utc at time zone 'UTC')::int in (1, 2, 12)
+            hourly.station_id,
+            extract(year from localized.hour_local_computed)::int::text as source_year,
+            to_char(hourly.hour_ending_utc at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as hour_utc
+        from weather.hourly_djf hourly
+        join weather.station station
+          on station.station_id = hourly.station_id
+        cross join lateral (
+            select (hourly.hour_ending_utc at time zone 'UTC')
+                + make_interval(hours => coalesce(station.local_standard_utc_offset_hours, 0)) as hour_local_computed
+        ) localized
+        where hourly.station_id in ({sql_list(station_ids)})
+          and extract(year from localized.hour_local_computed)::int between {int(min_year)} and {int(max_year)}
+          and extract(month from localized.hour_local_computed)::int in (1, 2, 12)
         """,
     )
     by_key: dict[tuple[str, int], set[str]] = defaultdict(set)
@@ -310,8 +323,34 @@ def fetch_canonical_hours(
     return by_key
 
 
+def fetch_station_offsets(
+    psql: Path,
+    host: str,
+    port: int,
+    dbname: str,
+    user: str | None,
+    station_ids: list[str],
+) -> dict[str, int]:
+    rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select
+            station_id,
+            coalesce(local_standard_utc_offset_hours, 0)::int::text as offset_hours
+        from weather.station
+        where station_id in ({sql_list(station_ids)})
+        """,
+    )
+    return {row["station_id"]: int(row["offset_hours"]) for row in rows}
+
+
 def classify_raw_file(
     path: Path,
+    offset_hours: int,
     reject_source_codes: set[str],
     min_temp_c: float,
     max_temp_c: float,
@@ -326,7 +365,10 @@ def classify_raw_file(
             for raw in reader:
                 stats["rows_seen"] += 1
                 dt = parse_noaa_datetime(raw.get("DATE", ""))
-                if dt is None or dt.month not in DJF_MONTHS:
+                if dt is None:
+                    continue
+                local_dt = dt + timedelta(hours=offset_hours)
+                if local_dt.month not in DJF_MONTHS:
                     continue
                 stats["djf_rows_seen"] += 1
                 hour = hour_text(canonical_hour(dt))
@@ -379,10 +421,11 @@ def choose_expected_hours(
     priority_rows: list[dict[str, str]],
     source_year: int,
     gap_expected_hours: int,
+    offset_hours: int,
 ) -> tuple[list[datetime], int, bool, int, str]:
     candidates: list[tuple[dict[str, str], list[datetime]]] = []
     for row in priority_rows:
-        hours = expected_hours_for_window(row, source_year)
+        hours = expected_hours_for_window(row, source_year, offset_hours)
         if hours:
             candidates.append((row, hours))
     if not candidates:
@@ -496,16 +539,18 @@ def build_station_year_rows(
     gap_rows: list[dict[str, str]],
     priority_by_station: dict[str, list[dict[str, str]]],
     canonical_hours: dict[tuple[str, int], set[str]],
+    station_offsets: dict[str, int],
     reject_source_codes: set[str],
     min_temp_c: float,
     max_temp_c: float,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    raw_cache: dict[str, tuple[dict[str, dict[str, object]], dict[str, int], str]] = {}
+    raw_cache: dict[tuple[str, int], tuple[dict[str, dict[str, object]], dict[str, int], str]] = {}
 
     for gap in gap_rows:
         station_id = gap["station_id"]
         source_year = int(gap["source_year"])
+        offset_hours = station_offsets.get(station_id, 0)
         gap_expected = int_value(gap.get("normalized_expected_djf_hours"))
         gap_missing = int_value(gap.get("missing_to_normalized_expected_hours"))
         priority_rows = priority_by_station.get(station_id, [])
@@ -513,17 +558,25 @@ def build_station_year_rows(
             priority_rows,
             source_year,
             gap_expected,
+            offset_hours,
         )
         expected_texts = [hour_text(hour) for hour in expected_hours]
         canonical = canonical_hours.get((station_id, source_year), set())
 
         path_text = gap.get("raw_file_path") or ""
-        if path_text not in raw_cache:
+        cache_key = (path_text, offset_hours)
+        if cache_key not in raw_cache:
             if path_text:
-                raw_cache[path_text] = classify_raw_file(Path(path_text), reject_source_codes, min_temp_c, max_temp_c)
+                raw_cache[cache_key] = classify_raw_file(
+                    Path(path_text),
+                    offset_hours,
+                    reject_source_codes,
+                    min_temp_c,
+                    max_temp_c,
+                )
             else:
-                raw_cache[path_text] = ({}, {}, "No raw_file_path on gap row.")
-        raw_hours, raw_stats, raw_error = raw_cache[path_text]
+                raw_cache[cache_key] = ({}, {}, "No raw_file_path on gap row.")
+        raw_hours, raw_stats, raw_error = raw_cache[cache_key]
 
         root_counts = Counter()
         canonical_present = 0
@@ -1103,6 +1156,14 @@ def main() -> int:
         min(years),
         max(years),
     )
+    station_offsets = fetch_station_offsets(
+        args.psql,
+        args.host,
+        args.port,
+        args.dbname,
+        args.user,
+        station_ids,
+    )
 
     code_commit = git_commit_label(args.project_root)
     run_timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
@@ -1117,6 +1178,7 @@ def main() -> int:
         gap_rows,
         priority_by_station,
         canonical_hours,
+        station_offsets,
         reject_source_codes,
         args.min_temp_c,
         args.max_temp_c,

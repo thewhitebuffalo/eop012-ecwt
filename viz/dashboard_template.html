@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EOP-012 ECWT — Analytics Dashboard</title>
+<script>__ECWT_DATA__</script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1b2330; --muted:#647089;
+    --line:#e3e7ee; --accent:#1f5fa8; --warn:#b4232a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
+  header h1{margin:0 0 2px;font-size:22px;letter-spacing:-.01em}
+  header .sub{color:var(--muted);font-size:13px}
+  .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid #d6a400;
+          background:#fff8e6;border-radius:6px;font-size:12.5px;color:#6b5400}
+  .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px}
+  @media(max-width:920px){.kpis{grid-template-columns:repeat(4,1fr)}}
+  @media(max-width:520px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
+  .kpi .v{font-size:20px;font-weight:650;letter-spacing:-.02em}
+  .kpi .l{font-size:11px;color:var(--muted);margin-top:2px}
+  .kpi.flag .v{color:var(--warn)}
+  .grid{display:grid;grid-template-columns:1.55fr 1fr;gap:16px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:15px 16px}
+  .card h2{margin:0 0 2px;font-size:14.5px}
+  .card .h-sub{color:var(--muted);font-size:12px;margin-bottom:10px}
+  .full{grid-column:1 / -1}
+  canvas{display:block;width:100%}
+  .legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:8px}
+  .legend .bar{height:11px;flex:1;border-radius:3px;
+    background:linear-gradient(90deg,#08306b,#2171b5,#6baed6,#d9e7f1,#fde0a8,#fb9a4b,#d7301f,#7f0000)}
+  .controls{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .controls button{font:inherit;font-size:12px;border:1px solid var(--line);background:#fff;
+    color:var(--ink);padding:4px 10px;border-radius:20px;cursor:pointer}
+  .controls button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tip{position:fixed;pointer-events:none;background:#11161f;color:#fff;font-size:11.5px;
+    padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .08s;max-width:220px;z-index:9;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .tip b{color:#7fc2ff}
+  svg text{font-family:inherit}
+  .foot{color:var(--muted);font-size:11.5px;margin-top:18px;line-height:1.6}
+  .foot code{background:#eef1f5;padding:1px 5px;border-radius:4px}
+  .mapnote{font-size:11px;color:var(--muted);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>EOP-012 Extreme Cold Weather Temperature — Release Dashboard</h1>
+    <div class="sub" id="sourceSub"></div>
+  </header>
+
+  <div class="banner" id="qualityBanner"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card full">
+      <h2>Where the cold is — ECWT by plant location (CONUS)</h2>
+      <div class="h-sub">Each point is a generating plant, colored by its ECWT. Hover for details.</div>
+      <div class="controls" id="mapctl">
+        <button data-mode="temp" class="on">Color: ECWT (&deg;F)</button>
+        <button data-mode="below">Highlight ECWT &lt; 32&deg;F</button>
+        <button data-mode="dist">Color: station distance</button>
+      </div>
+      <canvas id="map"></canvas>
+      <div class="legend" id="maplegend">
+        <span id="legL">colder</span><div class="bar" id="legbar"></div><span id="legR">warmer</span>
+      </div>
+      <div class="mapnote" id="mapnote"></div>
+    </div>
+
+    <div class="card">
+      <h2>Distribution of ECWT</h2>
+      <div class="h-sub" id="histSub"></div>
+      <svg id="hist" width="100%" viewBox="0 0 520 300" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <div class="card">
+      <h2>States ranked</h2>
+      <div class="controls" id="statectl">
+        <button data-k="mean" class="on">Mean ECWT</button>
+        <button data-k="min">Coldest plant</button>
+        <button data-k="below32pct">% &lt; 32&deg;F</button>
+        <button data-k="n">Plant count</button>
+      </div>
+      <svg id="states" width="100%" viewBox="0 0 520 760" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <div class="card full">
+      <h2>Data-quality reality check — station representativeness</h2>
+      <div class="h-sub" id="distSub"></div>
+      <svg id="dist" width="100%" viewBox="0 0 1000 150" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+  </div>
+
+  <div class="foot">
+    Generated locally from the public repo <code>thewhitebuffalo/eop012-ecwt</code>. ECWT below 32&deg;F is the EOP-012 applicability trigger.
+    This dashboard is a self-contained local file; it embeds its data and uses no internet connection.
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+(function(){
+  var D = window.ECWT;
+  if(!D){document.body.innerHTML="<p style='padding:30px'>embedded ECWT data not found in this file.</p>";return;}
+  var fmt = function(x){return (x>0?"+":"")+x.toFixed(1);};
+  var q = D.quality || {};
+  var releaseId = q.releaseId || "scoped_plant_ecwt_release";
+  document.getElementById("sourceSub").innerHTML =
+    'Source: <code style="font-size:11px">'+releaseId+'</code> · '+
+    D.kpis.plants.toLocaleString()+' policy rows · '+D.kpis.plotted.toLocaleString()+
+    ' plotted rows with coordinates and ECWT · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)';
+  var far100 = q.far100 || 0;
+  var farPct = q.far100pct == null ? 0 : q.far100pct;
+  var strictReason = q.reasonCodes && q.reasonCodes.passes_current_fixed_period_gate === D.kpis.plants;
+  var publicationCandidates = (q.statuses && q.statuses.publication_candidate) || 0;
+  var blockedRows = (q.statuses && q.statuses.blocked) || 0;
+  document.getElementById("qualityBanner").innerHTML = strictReason && far100 === 0
+    ? '<b>Fixed-period publication-candidate preview.</b> Every row shown passed the current fixed-period gate, and every recorded primary station is within 100 km. Use this for review and visualization; retain the CSV/report audit trail for any compliance workflow.'
+    : '<b>All-plants fixed-period policy result.</b> This view includes '+publicationCandidates.toLocaleString()+
+      ' publication candidates and '+blockedRows.toLocaleString()+
+      ' blocked rows. Blocked rows are shown for diagnosis, not as release-ready compliance outputs.';
+  document.getElementById("distSub").innerHTML = q.knownDistance
+    ? "How far is each plant's assigned primary weather station? "+
+      q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
+      ' rows with recorded distance are within 100 km; '+far100.toLocaleString()+
+      ' rows ('+farPct+'%) are 100 km or farther away.'
+    : "How far is each plant's assigned primary weather station? No station-distance values were recorded in the input CSV.";
+  document.getElementById("histSub").innerHTML =
+    '3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct ECWT values in this release: '+
+    D.kpis.distinct+'.';
+
+  // ---------- KPIs ----------
+  var k=D.kpis;
+  var cards=[
+    ["v "+k.plants.toLocaleString(),"Policy rows"],
+    [k.plotted.toLocaleString(),"Rows plotted"],
+    [publicationCandidates.toLocaleString(),"Publication candidates"],
+    [blockedRows.toLocaleString(),"Blocked rows","flag"],
+    [k.below32pct+"%","ECWT &lt; 32&deg;F among ECWT rows","flag"],
+    [fmt(k.meanF)+"&deg;","Mean ECWT"],
+    [fmt(k.minF)+"&deg;","Coldest plant"],
+    [k.states,"States"]
+  ];
+  document.getElementById("kpis").innerHTML = cards.map(function(c){
+    var v=String(c[0]).replace(/^v /,"");
+    return '<div class="kpi '+(c[2]||"")+'"><div class="v">'+v+'</div><div class="l">'+c[1]+'</div></div>';
+  }).join("");
+
+  // ---------- color scales ----------
+  var stops=[[-40,8,48,107],[-20,33,113,181],[0,107,174,214],[10,200,222,240],
+             [20,253,224,168],[30,251,154,75],[35,215,48,31],[40,127,0,0]];
+  function tempColor(e){
+    if(e<=stops[0][0]) e=stops[0][0]; if(e>=stops[stops.length-1][0]) e=stops[stops.length-1][0];
+    for(var i=0;i<stops.length-1;i++){
+      if(e>=stops[i][0]&&e<=stops[i+1][0]){
+        var t=(e-stops[i][0])/(stops[i+1][0]-stops[i][0]);
+        var r=Math.round(stops[i][1]+t*(stops[i+1][1]-stops[i][1]));
+        var g=Math.round(stops[i][2]+t*(stops[i+1][2]-stops[i][2]));
+        var b=Math.round(stops[i][3]+t*(stops[i+1][3]-stops[i][3]));
+        return "rgb("+r+","+g+","+b+")";
+      }
+    }
+    return "#888";
+  }
+  function distColor(d){
+    if(d==null) return "#c9ced6";
+    if(d<25) return "#1a9850"; if(d<50) return "#91cf60"; if(d<100) return "#fee08b";
+    if(d<200) return "#fc8d59"; return "#d73027";
+  }
+
+  // ---------- MAP ----------
+  var LON0=-125, LON1=-66, LAT0=24, LAT1=49.5;
+  var aspect=((LON1-LON0)*Math.cos(37*Math.PI/180))/(LAT1-LAT0);
+  var cv=document.getElementById("map"), ctx=cv.getContext("2d");
+  var mode="temp";
+  var pts=D.points;
+  var offExtent = pts.filter(function(p){return p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1;}).length;
+  document.getElementById("mapnote").textContent = offExtent
+    ? "Map shows the contiguous U.S. extent; "+offExtent.toLocaleString()+" off-extent rows are excluded from the map but included in all statistics."
+    : "Map shows all release rows within the contiguous U.S. extent.";
+  function project(p,w,h){
+    var x=(p.lo-LON0)/(LON1-LON0)*w;
+    var y=(LAT1-p.la)/(LAT1-LAT0)*h;
+    return [x,y];
+  }
+  function drawMap(){
+    var w=cv.clientWidth; var h=Math.round(w/aspect);
+    var dpr=window.devicePixelRatio||1;
+    cv.width=w*dpr; cv.height=h*dpr; cv.style.height=h+"px";
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle="#fbfcfd"; ctx.fillRect(0,0,w,h);
+    for(var i=0;i<pts.length;i++){
+      var p=pts[i];
+      if(p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1) continue;
+      var xy=project(p,w,h);
+      var col, r=1.7, a=0.82;
+      if(mode==="temp"){col=tempColor(p.e);}
+      else if(mode==="dist"){col=distColor(p.d);}
+      else { // below 32 highlight
+        if(p.e<32){col="#b4232a";a=0.85;} else {col="#cfd6e0";a=0.5;r=1.3;}
+      }
+      ctx.globalAlpha=a; ctx.fillStyle=col;
+      ctx.beginPath(); ctx.arc(xy[0],xy[1],r,0,6.2832); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    cv._w=w; cv._h=h;
+  }
+  // legend text per mode
+  function updLegend(){
+    var lb=document.getElementById("legbar"), L=document.getElementById("legL"), R=document.getElementById("legR");
+    if(mode==="temp"){lb.style.background="linear-gradient(90deg,#08306b,#2171b5,#6baed6,#d9e7f1,#fde0a8,#fb9a4b,#d7301f,#7f0000)";L.textContent="-40°F (colder)";R.textContent="+40°F (warmer)";}
+    else if(mode==="dist"){lb.style.background="linear-gradient(90deg,#1a9850,#91cf60,#fee08b,#fc8d59,#d73027)";L.textContent="0 km (near)";R.textContent="200+ km (far)";}
+    else {lb.style.background="linear-gradient(90deg,#b4232a,#b4232a 50%,#cfd6e0 50%,#cfd6e0)";L.textContent="< 32°F (applicable)";R.textContent="≥ 32°F";}
+  }
+  var ctl=document.getElementById("mapctl");
+  ctl.addEventListener("click",function(e){
+    if(e.target.tagName!=="BUTTON")return;
+    [].forEach.call(ctl.children,function(b){b.classList.remove("on");});
+    e.target.classList.add("on"); mode=e.target.getAttribute("data-mode");
+    updLegend(); drawMap();
+  });
+  // tooltip — nearest point under cursor
+  var tip=document.getElementById("tip");
+  cv.addEventListener("mousemove",function(ev){
+    var rect=cv.getBoundingClientRect();
+    var mx=ev.clientX-rect.left, my=ev.clientY-rect.top, w=cv._w,h=cv._h;
+    var best=null,bd=64;
+    for(var i=0;i<pts.length;i++){
+      var p=pts[i];
+      if(p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1)continue;
+      var xy=project(p,w,h); var dx=xy[0]-mx,dy=xy[1]-my,d2=dx*dx+dy*dy;
+      if(d2<bd){bd=d2;best=p;}
+    }
+    if(best){
+      tip.innerHTML="<b>"+best.n+"</b> ("+best.s+")<br>ECWT "+fmt(best.e)+"°F"+
+        (best.d!=null?"<br>station "+best.d+" km away":"<br>station distance n/a")+
+        (best.st?"<br>"+best.st:"")+
+        (best.r?"<br>"+best.r:"");
+      tip.style.left=(ev.clientX+14)+"px"; tip.style.top=(ev.clientY+14)+"px"; tip.style.opacity=1;
+    } else tip.style.opacity=0;
+  });
+  cv.addEventListener("mouseleave",function(){tip.style.opacity=0;});
+
+  // ---------- HISTOGRAM ----------
+  (function(){
+    var H=D.hist, W=520,Ht=300, pad={l:38,r:10,t:12,b:34};
+    var maxc=Math.max.apply(null,H.map(function(d){return d.c;}));
+    var x0=H[0].x0, x1=H[H.length-1].x1;
+    var iw=W-pad.l-pad.r, ih=Ht-pad.t-pad.b;
+    var sx=function(v){return pad.l+(v-x0)/(x1-x0)*iw;};
+    var sy=function(c){return pad.t+ih-(c/maxc)*ih;};
+    var s="";
+    // y gridlines
+    for(var g=0;g<=4;g++){var yv=maxc*g/4;var yy=sy(yv);
+      s+='<line x1="'+pad.l+'" y1="'+yy+'" x2="'+(W-pad.r)+'" y2="'+yy+'" stroke="#eef1f5"/>';
+      s+='<text x="'+(pad.l-5)+'" y="'+(yy+3)+'" text-anchor="end" font-size="9" fill="#8a93a3">'+Math.round(yv)+'</text>';}
+    H.forEach(function(d){
+      var x=sx(d.x0), bw=Math.max(1,sx(d.x1)-sx(d.x0)-1), y=sy(d.c);
+      var cmid=(d.x0+d.x1)/2;
+      s+='<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+(pad.t+ih-y)+'" fill="'+tempColor(cmid)+'" opacity="0.9"/>';
+    });
+    // 32F threshold
+    var tx=sx(32);
+    s+='<line x1="'+tx+'" y1="'+pad.t+'" x2="'+tx+'" y2="'+(pad.t+ih)+'" stroke="#b4232a" stroke-width="1.4" stroke-dasharray="4 3"/>';
+    s+='<text x="'+(tx-4)+'" y="'+(pad.t+11)+'" text-anchor="end" font-size="9.5" fill="#b4232a">32°F</text>';
+    // x ticks
+    [-40,-20,0,20,40].forEach(function(t){var xx=sx(t);
+      s+='<text x="'+xx+'" y="'+(Ht-12)+'" text-anchor="middle" font-size="9.5" fill="#647089">'+t+'</text>';});
+    s+='<text x="'+(pad.l+iw/2)+'" y="'+(Ht-1)+'" text-anchor="middle" font-size="10" fill="#8a93a3">ECWT (°F)</text>';
+    document.getElementById("hist").innerHTML=s;
+  })();
+
+  // ---------- STATE RANKING ----------
+  var stSvg=document.getElementById("states");
+  function drawStates(key){
+    var arr=D.byState.slice();
+    var asc=(key==="mean"||key==="min"); // colder first
+    arr.sort(function(a,b){return asc?a[key]-b[key]:b[key]-a[key];});
+    var W=520, rowH=14.4, top=8, padL=34, padR=46, barMax=W-padL-padR;
+    var Ht=top+arr.length*rowH+6;
+    stSvg.setAttribute("viewBox","0 0 "+W+" "+Ht);
+    var vals=arr.map(function(d){return d[key];});
+    var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals);
+    if(key==="below32pct"){lo=0;hi=100;} if(key==="n"){lo=0;}
+    var span=(hi-lo)||1;
+    var zero=(key==="mean"||key==="min")?padL+(0-lo)/span*barMax:padL;
+    var s="";
+    arr.forEach(function(d,i){
+      var y=top+i*rowH;
+      var v=d[key];
+      var col,label,bx,bw;
+      if(key==="mean"||key==="min"){
+        col=tempColor(v);
+        var vx=padL+(v-lo)/span*barMax;
+        bx=Math.min(zero,vx); bw=Math.abs(vx-zero);
+        label=fmt(v)+"°";
+      } else if(key==="below32pct"){
+        col="#b4232a"; bx=padL; bw=v/100*barMax; label=v+"%";
+      } else {
+        col="#1f5fa8"; bx=padL; bw=(v-lo)/span*barMax; label=v;
+      }
+      s+='<text x="'+(padL-4)+'" y="'+(y+rowH-3.5)+'" text-anchor="end" font-size="9.5" fill="#3a4456">'+d.s+'</text>';
+      s+='<rect x="'+bx+'" y="'+(y+1.5)+'" width="'+Math.max(0.5,bw)+'" height="'+(rowH-4)+'" rx="2" fill="'+col+'" opacity="0.92"/>';
+      s+='<text x="'+(W-padR+4)+'" y="'+(y+rowH-3.5)+'" font-size="9" fill="#647089">'+label+'</text>';
+    });
+    if(key==="mean"||key==="min"){
+      s+='<line x1="'+zero+'" y1="'+top+'" x2="'+zero+'" y2="'+(top+arr.length*rowH)+'" stroke="#aeb6c3" stroke-width="1"/>';
+    }
+    stSvg.innerHTML=s;
+  }
+  var sctl=document.getElementById("statectl");
+  sctl.addEventListener("click",function(e){
+    if(e.target.tagName!=="BUTTON")return;
+    [].forEach.call(sctl.children,function(b){b.classList.remove("on");});
+    e.target.classList.add("on"); drawStates(e.target.getAttribute("data-k"));
+  });
+
+  // ---------- DISTANCE BUCKETS ----------
+  (function(){
+    var d=D.dist, W=1000,Ht=150,pad={l:10,r:10,t:10,b:34};
+    var order=[["a","< 25 km","#1a9850"],["b","25–50 km","#91cf60"],["c","50–100 km","#fee08b"],
+               ["d","100–200 km","#fc8d59"],["e","> 200 km","#d73027"],["u","no distance recorded","#c9ced6"]];
+    var tot=order.reduce(function(a,o){return a+(d[o[0]]||0);},0);
+    var iw=W-pad.l-pad.r, x=pad.l, h=46, y=pad.t+12;
+    var s='<text x="'+pad.l+'" y="'+pad.t+'" font-size="11" fill="#647089">'+tot.toLocaleString()+' plants — segment width = share of plants</text>';
+    order.forEach(function(o){
+      var c=d[o[0]]||0; var w=c/tot*iw;
+      s+='<rect x="'+x+'" y="'+y+'" width="'+Math.max(0,w-1)+'" height="'+h+'" fill="'+o[2]+'" opacity="0.9"/>';
+      if(w>54){
+        s+='<text x="'+(x+w/2)+'" y="'+(y+19)+'" text-anchor="middle" font-size="11" font-weight="600" fill="#23303f">'+Math.round(c/tot*100)+'%</text>';
+        s+='<text x="'+(x+w/2)+'" y="'+(y+34)+'" text-anchor="middle" font-size="10" fill="#3a4456">'+o[1]+'</text>';
+      }
+      x+=w;
+    });
+    // callout
+    var farPct=tot ? Math.round(((d.d+d.e)/tot)*100) : 0;
+    var farColor=(d.d+d.e)>0 ? "#b4232a" : "#1a7650";
+    s+='<text x="'+pad.l+'" y="'+(y+h+24)+'" font-size="11.5" fill="'+farColor+'"><tspan font-weight="700">'+farPct+'%</tspan> of rows are matched to a station 100 km or farther away.</text>';
+    document.getElementById("dist").innerHTML=s;
+  })();
+
+  // init + resize
+  updLegend(); drawMap(); drawStates("mean");
+  var rt; window.addEventListener("resize",function(){clearTimeout(rt);rt=setTimeout(drawMap,150);});
+})();
+</script>
+</body>
+</html>

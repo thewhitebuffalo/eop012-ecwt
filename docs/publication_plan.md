@@ -16,6 +16,7 @@ This repository is the audit/control plane. It is not the storage location for h
 | Raw NOAA hourly files/cache | `/Volumes/NOAA_CACHE` and upstream NOAA URLs | No | Publish source manifests and hashes where practical. |
 | Working Postgres database | `/Volumes/NOAA_CACHE/EOP012` | No | Rebuildable local/CI artifact, not a Git artifact. |
 | Release data bundles | GitHub Releases or external object storage | Not in repo history | Use split compressed Parquet/CSV bundles plus checksums. |
+| Timestamped run products | Local `docs/`, `data/processed/`, or staging roots | No | CSVs, JSON manifests, and per-run reports are regenerated locally or attached to a release bundle. |
 
 ## Release Structure
 
@@ -118,6 +119,8 @@ Keep Git history clean:
 - Do not commit database files.
 - Do not commit generated Parquet bundles.
 - Do not commit files larger than 50 MB.
-- Keep generated CSV previews small.
+- Do not commit generated CSV runs, timestamped QA reports, release extracts, or local `data/processed/*` outputs.
+- Keep only stable, curated documentation in `docs/`; generated per-run artifacts must stay local unless they are packaged as release assets.
 - Store checksums and source manifests for large files instead of the files themselves.
 
+The repository `.gitignore` enforces this boundary for the known generated-output patterns. If a generated artifact is intentionally published, attach it to a versioned release and include its checksum in the release manifest rather than force-adding it into normal repo history.
