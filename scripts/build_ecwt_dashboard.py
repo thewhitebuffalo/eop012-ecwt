@@ -53,6 +53,19 @@ def _f(value):
         return None
 
 
+def _int(value):
+    f = _f(value)
+    return int(round(f)) if f is not None else None
+
+
+def _top_pairs(value, limit):
+    """Parse a {key: count} JSON column into a descending [[key, count], ...]
+    list capped at ``limit``; returns (pairs, total_keys)."""
+    counts = _json_counts(value)
+    pairs = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    return [[k, v] for k, v in pairs[:limit]], len(counts)
+
+
 def _truthy(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
 
@@ -170,6 +183,10 @@ def build_payload(release_csv: Path) -> dict:
                 vals.append(e)
             if la is not None and lo is not None and e is not None:
                 plotted_rows += 1
+                cov = _f(row.get("coverage_ratio"))
+                dr = _f(row.get("ecwt_discrete_f"))
+                ctw_top, ctw_n = _top_pairs(row.get("contributing_towers"), 6)
+                ctp_top, _ = _top_pairs(row.get("cold_tail_provenance"), 8)
                 points.append({
                     "la": round(la, 3),
                     "lo": round(lo, 3),
@@ -183,6 +200,18 @@ def build_payload(release_csv: Path) -> dict:
                     "t": tier,
                     "nr": _truthy(row.get("needs_review")),
                     "sid": (row.get("primary_station_id") or "").strip(),
+                    # per-plant detail (click-to-open panel)
+                    "dr": round(dr, 1) if dr is not None else None,
+                    "cov": round(cov * 100, 1) if cov is not None else None,
+                    "vh": _int(row.get("valid_hour_count")),
+                    "eh": _int(row.get("expected_hour_count")),
+                    "fh": _int(row.get("filled_hour_count")),
+                    "cty": (row.get("plant_county") or "").strip(),
+                    "eia": (row.get("eia_plant_code") or "").strip(),
+                    "ttc": _int(row.get("towers_tried_count")),
+                    "ctw": ctw_top,    # [[station_id, hours], ...] top 6 by hours
+                    "ctwN": ctw_n,     # total contributing towers
+                    "ctp": ctp_top,    # [["station|source", hours], ...] cold-tail
                 })
                 by_state.setdefault(state, []).append(e)
 
