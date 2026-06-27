@@ -23,7 +23,7 @@ Usage:
 The release CSV must contain these columns:
     plant_latitude, plant_longitude, ecwt_f, plant_state, plant_name
 and optionally:
-    primary_station_distance_km
+    primary_station_distance_km, confidence_tier, source_channels
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,12 +44,46 @@ def _f(value):
     if value is None:
         return None
     value = value.strip()
-    if value == "":
+    if value in ("", "\\N", "NULL", "None", "none"):
         return None
     try:
         return float(value)
     except ValueError:
         return None
+
+
+def _truthy(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _json_counts(value) -> dict[str, int]:
+    value = (value or "").strip()
+    if value in ("", "\\N"):
+        return {}
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    out: dict[str, int] = {}
+    for key, count in raw.items():
+        try:
+            out[str(key)] = int(count)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _add_counts(target: dict[str, int], counts: dict[str, int]) -> None:
+    for key, count in counts.items():
+        target[key] = target.get(key, 0) + count
+
+
+def _nice_ticks(lo: float, hi: float) -> list[int]:
+    span = max(1.0, hi - lo)
+    step = 10 if span <= 90 else 20
+    start = int(math.floor(lo / step) * step)
+    end = int(math.ceil(hi / step) * step)
+    return list(range(start, end + step, step))
 
 
 def build_payload(release_csv: Path) -> dict:
@@ -57,16 +92,32 @@ def build_payload(release_csv: Path) -> dict:
     by_state = {}
     dist = {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "u": 0}  # <25,25-50,50-100,100-200,>200,unknown
     statuses = {}
+    confidence_tiers = {}
+    source_channels = {}
     reason_codes = {}
+    reasons = {}
     total_rows = 0
     rows_with_coords = 0
     rows_with_ecwt = 0
     plotted_rows = 0
+    needs_review_rows = 0
+    first_release_id = None
+    first_run_id = None
+    coverage_basis = None
+    publication_caveat = None
 
     with release_csv.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             total_rows += 1
+            if not first_release_id and row.get("release_id"):
+                first_release_id = row["release_id"].strip()
+            if not first_run_id and row.get("adr0004_run_id"):
+                first_run_id = row["adr0004_run_id"].strip()
+            if not coverage_basis and row.get("coverage_basis"):
+                coverage_basis = row["coverage_basis"].strip()
+            if not publication_caveat and row.get("publication_caveat"):
+                publication_caveat = row["publication_caveat"].strip()
             la = _f(row.get("plant_latitude"))
             lo = _f(row.get("plant_longitude"))
             e = _f(row.get("ecwt_f"))
@@ -89,12 +140,21 @@ def build_payload(release_csv: Path) -> dict:
                     dist["d"] += 1
                 else:
                     dist["e"] += 1
-            status = (row.get("readiness_status") or "").strip()
+            tier = (row.get("confidence_tier") or "").strip()
+            status = tier or (row.get("readiness_status") or "").strip()
             reason_code = (row.get("reason_code") or "").strip()
+            reason = (row.get("reason") or "").strip()
+            if _truthy(row.get("needs_review")):
+                needs_review_rows += 1
             if status:
                 statuses[status] = statuses.get(status, 0) + 1
+            if tier:
+                confidence_tiers[tier] = confidence_tiers.get(tier, 0) + 1
             if reason_code:
                 reason_codes[reason_code] = reason_codes.get(reason_code, 0) + 1
+            if reason:
+                reasons[reason] = reasons.get(reason, 0) + 1
+            _add_counts(source_channels, _json_counts(row.get("source_channels")))
             if la is not None and lo is not None:
                 rows_with_coords += 1
             if e is not None:
@@ -110,7 +170,11 @@ def build_payload(release_csv: Path) -> dict:
                     "d": d_out,
                     "n": (row.get("plant_name") or "").strip(),
                     "r": reason_code,
+                    "rs": reason,
                     "st": status,
+                    "t": tier,
+                    "nr": _truthy(row.get("needs_review")),
+                    "sid": (row.get("primary_station_id") or "").strip(),
                 })
                 by_state.setdefault(state, []).append(e)
 
@@ -137,11 +201,14 @@ def build_payload(release_csv: Path) -> dict:
         "below32pct": round(100 * below32 / n, 1),
     }
 
-    release_id = release_csv.stem
+    release_id = first_release_id or release_csv.stem
     far100 = dist["d"] + dist["e"]
     known_distance = sum(dist[key] for key in ("a", "b", "c", "d", "e"))
     quality = {
         "releaseId": release_id,
+        "adrRunId": first_run_id,
+        "coverageBasis": coverage_basis,
+        "publicationCaveat": publication_caveat,
         "knownDistance": known_distance,
         "far100": far100,
         "far100pct": round(100 * far100 / known_distance, 1) if known_distance else None,
@@ -151,8 +218,12 @@ def build_payload(release_csv: Path) -> dict:
         "rowsWithEcwt": rows_with_ecwt,
         "rowsMissingEcwt": total_rows - rows_with_ecwt,
         "rowsMissingCoords": total_rows - rows_with_coords,
+        "needsReviewRows": needs_review_rows,
+        "confidenceTiers": confidence_tiers,
         "statuses": statuses,
         "reasonCodes": reason_codes,
+        "reasons": reasons,
+        "sourceChannels": source_channels,
     }
 
     state_rows = []
@@ -166,14 +237,41 @@ def build_payload(release_csv: Path) -> dict:
             "below32pct": round(100 * b / len(g), 1),
         })
 
+    bin_width = 3
+    start = int(math.floor(min(vals) / bin_width) * bin_width)
+    end = int(math.ceil(max(vals) / bin_width) * bin_width + bin_width)
     hist = []
-    x = -42
-    while x < 42:
+    x = start
+    while x < end:
         c = sum(1 for v in vals if x <= v < x + 3)
         hist.append({"x0": x, "x1": x + 3, "c": c})
         x += 3
 
-    return {"kpis": kpis, "quality": quality, "byState": state_rows, "hist": hist, "dist": dist, "points": points}
+    tier_order = ["complete", "adequate", "provisional_review", "blocked_no_data"]
+    tier_rows = [
+        {"key": key, "label": key.replace("_", " "), "count": confidence_tiers.get(key, 0)}
+        for key in tier_order
+        if confidence_tiers.get(key, 0)
+    ]
+    for key, count in sorted(confidence_tiers.items()):
+        if key not in tier_order:
+            tier_rows.append({"key": key, "label": key.replace("_", " "), "count": count})
+    source_rows = [
+        {"key": key, "label": key.replace("_", " "), "count": count}
+        for key, count in sorted(source_channels.items(), key=lambda item: item[1], reverse=True)
+    ]
+
+    return {
+        "kpis": kpis,
+        "quality": quality,
+        "byState": state_rows,
+        "hist": hist,
+        "histTicks": _nice_ticks(start, end),
+        "dist": dist,
+        "tiers": tier_rows,
+        "sources": source_rows,
+        "points": points,
+    }
 
 
 def main() -> int:

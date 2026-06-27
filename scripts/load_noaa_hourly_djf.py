@@ -125,12 +125,35 @@ def copy_command(table: str, columns: list[str], path: Path) -> str:
 
 def ensure_load_schema(psql: Path, host: str, port: int, dbname: str, user: str | None) -> None:
     sql = """
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname = 'weather'
+          and t.typname = 'source_channel'
+    ) then
+        create type weather.source_channel as enum (
+            'noaa_global_hourly_aws',
+            'noaa_lcd_cdo',
+            'asos_iem',
+            'noaa_isd_local_cache'
+        );
+    end if;
+end $$;
+
 alter table weather.station
     add column if not exists local_standard_utc_offset_hours integer;
 update weather.station
 set local_standard_utc_offset_hours = greatest(-12, least(14, round(longitude / 15.0)::integer))
 where local_standard_utc_offset_hours is null
   and longitude is not null;
+alter table weather.hourly_djf
+    add column if not exists obs_timestamp timestamptz,
+    add column if not exists source_channel weather.source_channel,
+    add column if not exists source_code text,
+    add column if not exists report_type text;
 create table if not exists weather.noaa_hourly_load_file (
     load_file_id text primary key,
     calculation_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -487,9 +510,17 @@ def parse_file(
                     "station_id": station_id,
                     "hour_ending_utc": hour.isoformat(timespec="seconds"),
                     "hour_local": local_hour.isoformat(timespec="seconds"),
+                    "obs_timestamp": dt.isoformat(timespec="seconds"),
                     "dry_bulb_c": f"{temp_c:.3f}",
                     "dry_bulb_f": f"{(temp_c * 9.0 / 5.0) + 32.0:.3f}",
                     "source_file_id": source_file_id,
+                    "source_channel": (
+                        "noaa_global_hourly_aws"
+                        if row["source_basis"] == "download_attempt"
+                        else "noaa_isd_local_cache"
+                    ),
+                    "source_code": noaa_source,
+                    "report_type": report_type,
                     "quality_flags_text": quality_flags,
                     "calculation_run_id": run_id,
                 }
@@ -532,9 +563,13 @@ def build_load_sql(
         "station_id",
         "hour_ending_utc",
         "hour_local",
+        "obs_timestamp",
         "dry_bulb_c",
         "dry_bulb_f",
         "source_file_id",
+        "source_channel",
+        "source_code",
+        "report_type",
         "quality_flags_text",
         "calculation_run_id",
     ]
@@ -611,9 +646,13 @@ create temp table stg_hourly_djf (
     station_id text,
     hour_ending_utc timestamptz,
     hour_local timestamp,
+    obs_timestamp timestamptz,
     dry_bulb_c numeric,
     dry_bulb_f numeric,
     source_file_id text,
+    source_channel weather.source_channel,
+    source_code text,
+    report_type text,
     quality_flags_text text,
     calculation_run_id text
 ) on commit drop;
@@ -635,6 +674,10 @@ select
     existing.station_id is not null
       and (
           existing.source_file_id is distinct from staged.source_file_id
+          or existing.obs_timestamp is distinct from staged.obs_timestamp
+          or existing.source_channel is distinct from staged.source_channel
+          or existing.source_code is distinct from staged.source_code
+          or existing.report_type is distinct from staged.report_type
           or existing.quality_flags is distinct from array_remove(string_to_array(staged.quality_flags_text, '|'), '')
       ) as metadata_differs
 from stg_hourly_djf staged
@@ -657,9 +700,13 @@ insert into weather.hourly_djf (
     station_id,
     hour_ending_utc,
     hour_local,
+    obs_timestamp,
     dry_bulb_c,
     dry_bulb_f,
     source_file_id,
+    source_channel,
+    source_code,
+    report_type,
     quality_flags,
     calculation_run_id
 )
@@ -667,9 +714,13 @@ select
     staged.station_id,
     staged.hour_ending_utc,
     staged.hour_local,
+    staged.obs_timestamp,
     staged.dry_bulb_c,
     staged.dry_bulb_f,
     staged.source_file_id,
+    staged.source_channel,
+    staged.source_code,
+    staged.report_type,
     array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
     staged.calculation_run_id
 from stg_hourly_djf staged
@@ -683,9 +734,13 @@ on conflict (station_id, hour_ending_utc) do nothing;
 update weather.hourly_djf existing
 set
     hour_local = staged.hour_local,
+    obs_timestamp = staged.obs_timestamp,
     dry_bulb_c = staged.dry_bulb_c,
     dry_bulb_f = staged.dry_bulb_f,
     source_file_id = staged.source_file_id,
+    source_channel = staged.source_channel,
+    source_code = staged.source_code,
+    report_type = staged.report_type,
     quality_flags = array_remove(string_to_array(staged.quality_flags_text, '|'), ''),
     calculation_run_id = staged.calculation_run_id
 from stg_hourly_djf staged
@@ -694,7 +749,7 @@ join stg_hourly_rebuild_audit audit
  and audit.hour_ending_utc = staged.hour_ending_utc
 where existing.station_id = staged.station_id
   and existing.hour_ending_utc = staged.hour_ending_utc
-  and audit.payload_differs;
+  and (audit.payload_differs or audit.metadata_differs);
 """,
             """
 create temp table stg_noaa_hourly_load_file (

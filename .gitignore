@@ -9,16 +9,14 @@
 .venv/
 __pycache__/
 data/raw/
-data/processed/*
 data/rebuild_chunks/
 db/
 
-# Generated run products. Keep release bundles outside repo history and publish
-# them through GitHub Releases or external object storage with checksums.
-docs/*.csv
-docs/*T*Z*.md
-docs/scoped_plant_ecwt_release_*_manifest.json
-docs/noaa_backfill_download_batch*_report.md
+# Local working extracts and smoke outputs. Published ECWT release results,
+# dashboards, manifests, and status docs are intentionally allowed in Git.
+data/processed/eia860*/
+data/processed/*_smoke*.csv
 
-# Generated visualization output (publish via Pages/Release, not git)
-build/
+# GitHub rejects normal blobs above 100 MB. Publish split cold-tail CSV parts.
+data/processed/*_cold_tail_hours.csv
+!data/processed/*_cold_tail_hours_part*.csv

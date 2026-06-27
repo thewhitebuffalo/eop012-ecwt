@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EOP-012 ECWT — Analytics Dashboard</title>
+<title>EOP-012 ADR-0004 ECWT Dashboard</title>
 <script>__ECWT_DATA__</script>
 <style>
   :root{
@@ -14,20 +14,20 @@
   body{margin:0;background:var(--bg);color:var(--ink);
        font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45}
   .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
-  header h1{margin:0 0 2px;font-size:22px;letter-spacing:-.01em}
+  header h1{margin:0 0 2px;font-size:22px;letter-spacing:0}
   header .sub{color:var(--muted);font-size:13px}
   .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid #d6a400;
           background:#fff8e6;border-radius:6px;font-size:12.5px;color:#6b5400}
   .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px}
   @media(max-width:920px){.kpis{grid-template-columns:repeat(4,1fr)}}
   @media(max-width:520px){.kpis{grid-template-columns:repeat(2,1fr)}}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
-  .kpi .v{font-size:20px;font-weight:650;letter-spacing:-.02em}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:11px 12px}
+  .kpi .v{font-size:20px;font-weight:650;letter-spacing:0}
   .kpi .l{font-size:11px;color:var(--muted);margin-top:2px}
   .kpi.flag .v{color:var(--warn)}
   .grid{display:grid;grid-template-columns:1.55fr 1fr;gap:16px}
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:15px 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:15px 16px}
   .card h2{margin:0 0 2px;font-size:14.5px}
   .card .h-sub{color:var(--muted);font-size:12px;margin-bottom:10px}
   .full{grid-column:1 / -1}
@@ -51,7 +51,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>EOP-012 Extreme Cold Weather Temperature — Release Dashboard</h1>
+    <h1>EOP-012 ADR-0004 Extreme Cold Weather Temperature Dashboard</h1>
     <div class="sub" id="sourceSub"></div>
   </header>
 
@@ -93,6 +93,12 @@
     </div>
 
     <div class="card full">
+      <h2>Confidence and provenance</h2>
+      <div class="h-sub" id="tierSub"></div>
+      <svg id="tiers" width="100%" viewBox="0 0 1000 220" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <div class="card full">
       <h2>Data-quality reality check — station representativeness</h2>
       <div class="h-sub" id="distSub"></div>
       <svg id="dist" width="100%" viewBox="0 0 1000 150" preserveAspectRatio="xMidYMid meet"></svg>
@@ -100,8 +106,8 @@
   </div>
 
   <div class="foot">
-    Generated locally from the public repo <code>thewhitebuffalo/eop012-ecwt</code>. ECWT below 32&deg;F is the EOP-012 applicability trigger.
-    This dashboard is a self-contained local file; it embeds its data and uses no internet connection.
+    Generated locally from the public repo <code>thewhitebuffalo/eop012-ecwt</code>. ECWT is displayed to 0.1&deg;F.
+    This dashboard is analytical and is not a compliance filing. It is a self-contained local file; it embeds its data and uses no internet connection.
   </div>
 </div>
 <div class="tip" id="tip"></div>
@@ -113,20 +119,21 @@
   var fmt = function(x){return (x>0?"+":"")+x.toFixed(1);};
   var q = D.quality || {};
   var releaseId = q.releaseId || "scoped_plant_ecwt_release";
+  var runId = q.adrRunId || "";
+  var tiers = q.confidenceTiers || {};
+  var complete = tiers.complete || 0;
+  var adequate = tiers.adequate || 0;
+  var provisional = tiers.provisional_review || 0;
+  var blocked = tiers.blocked_no_data || 0;
+  var tierReady = complete + adequate;
   document.getElementById("sourceSub").innerHTML =
-    'Source: <code style="font-size:11px">'+releaseId+'</code> · '+
+    'Source: <code style="font-size:11px">'+releaseId+'</code>'+(runId?' · Run: <code style="font-size:11px">'+runId+'</code>':'')+' · '+
     D.kpis.plants.toLocaleString()+' policy rows · '+D.kpis.plotted.toLocaleString()+
-    ' plotted rows with coordinates and ECWT · ECWT = lowest 0.2-percentile DJF hourly temperature (NERC EOP-012)';
+    ' plotted rows with coordinates and ECWT · coverage basis: '+(q.coverageBasis || 'fixed-period DJF since 2000');
   var far100 = q.far100 || 0;
   var farPct = q.far100pct == null ? 0 : q.far100pct;
-  var strictReason = q.reasonCodes && q.reasonCodes.passes_current_fixed_period_gate === D.kpis.plants;
-  var publicationCandidates = (q.statuses && q.statuses.publication_candidate) || 0;
-  var blockedRows = (q.statuses && q.statuses.blocked) || 0;
-  document.getElementById("qualityBanner").innerHTML = strictReason && far100 === 0
-    ? '<b>Fixed-period publication-candidate preview.</b> Every row shown passed the current fixed-period gate, and every recorded primary station is within 100 km. Use this for review and visualization; retain the CSV/report audit trail for any compliance workflow.'
-    : '<b>All-plants fixed-period policy result.</b> This view includes '+publicationCandidates.toLocaleString()+
-      ' publication candidates and '+blockedRows.toLocaleString()+
-      ' blocked rows. Blocked rows are shown for diagnosis, not as release-ready compliance outputs.';
+  document.getElementById("qualityBanner").innerHTML =
+    '<b>ADR-0004 analytical release.</b> Every non-AK plant with observed weather data receives ECWT plus a confidence tier; only zero-data plants are blocked. Complete is the strict ADR-0002-style tier. '+(q.publicationCaveat || 'Analytical output; not a compliance filing.');
   document.getElementById("distSub").innerHTML = q.knownDistance
     ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
@@ -136,17 +143,20 @@
   document.getElementById("histSub").innerHTML =
     '3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct ECWT values in this release: '+
     D.kpis.distinct+'.';
+  document.getElementById("tierSub").innerHTML =
+    tierReady.toLocaleString()+' plants are complete/adequate; '+provisional.toLocaleString()+
+    ' are provisional review; '+blocked.toLocaleString()+' are blocked for no observed station data. Source bars show plant-composite hour contributions, not unique raw NOAA observations.';
 
   // ---------- KPIs ----------
   var k=D.kpis;
   var cards=[
     ["v "+k.plants.toLocaleString(),"Policy rows"],
-    [k.plotted.toLocaleString(),"Rows plotted"],
-    [publicationCandidates.toLocaleString(),"Publication candidates"],
-    [blockedRows.toLocaleString(),"Blocked rows","flag"],
+    [k.rowsWithEcwt.toLocaleString(),"Rows with ECWT"],
+    [tierReady.toLocaleString(),"Complete/adequate"],
+    [provisional.toLocaleString(),"Provisional review","flag"],
+    [blocked.toLocaleString(),"Blocked no data","flag"],
     [k.below32pct+"%","ECWT &lt; 32&deg;F among ECWT rows","flag"],
     [fmt(k.meanF)+"&deg;","Mean ECWT"],
-    [fmt(k.minF)+"&deg;","Coldest plant"],
     [k.states,"States"]
   ];
   document.getElementById("kpis").innerHTML = cards.map(function(c){
@@ -243,7 +253,10 @@
     if(best){
       tip.innerHTML="<b>"+best.n+"</b> ("+best.s+")<br>ECWT "+fmt(best.e)+"°F"+
         (best.d!=null?"<br>station "+best.d+" km away":"<br>station distance n/a")+
-        (best.st?"<br>"+best.st:"")+
+        (best.sid?"<br>station "+best.sid:"")+
+        (best.t?"<br>tier: "+best.t.replace(/_/g," "):"")+
+        (best.nr?"<br>needs review":"")+
+        (best.rs?"<br>"+best.rs:"")+
         (best.r?"<br>"+best.r:"");
       tip.style.left=(ev.clientX+14)+"px"; tip.style.top=(ev.clientY+14)+"px"; tip.style.opacity=1;
     } else tip.style.opacity=0;
@@ -273,7 +286,8 @@
     s+='<line x1="'+tx+'" y1="'+pad.t+'" x2="'+tx+'" y2="'+(pad.t+ih)+'" stroke="#b4232a" stroke-width="1.4" stroke-dasharray="4 3"/>';
     s+='<text x="'+(tx-4)+'" y="'+(pad.t+11)+'" text-anchor="end" font-size="9.5" fill="#b4232a">32°F</text>';
     // x ticks
-    [-40,-20,0,20,40].forEach(function(t){var xx=sx(t);
+    (D.histTicks || [-40,-20,0,20,40]).forEach(function(t){var xx=sx(t);
+      if(t<x0 || t>x1)return;
       s+='<text x="'+xx+'" y="'+(Ht-12)+'" text-anchor="middle" font-size="9.5" fill="#647089">'+t+'</text>';});
     s+='<text x="'+(pad.l+iw/2)+'" y="'+(Ht-1)+'" text-anchor="middle" font-size="10" fill="#8a93a3">ECWT (°F)</text>';
     document.getElementById("hist").innerHTML=s;
@@ -323,6 +337,56 @@
     [].forEach.call(sctl.children,function(b){b.classList.remove("on");});
     e.target.classList.add("on"); drawStates(e.target.getAttribute("data-k"));
   });
+
+  // ---------- CONFIDENCE + PROVENANCE ----------
+  (function(){
+    var W=1000,Ht=220,pad={l:10,r:10,t:12,b:10}, iw=W-pad.l-pad.r;
+    var tierColors={
+      complete:"#1a9850",
+      adequate:"#74add1",
+      provisional_review:"#fdae61",
+      blocked_no_data:"#b4232a"
+    };
+    var sourceColors={
+      noaa_global_hourly_aws:"#1f5fa8",
+      noaa_lcd_cdo:"#2ca25f",
+      asos_iem:"#8856a7",
+      noaa_isd_local_cache:"#d95f0e"
+    };
+    function rowBar(rows,y,title,colors,valueLabel){
+      var total=rows.reduce(function(a,r){return a+(r.count||0);},0);
+      var s='<text x="'+pad.l+'" y="'+y+'" font-size="12" font-weight="650" fill="#1b2330">'+title+'</text>';
+      if(!total){
+        return s+'<text x="'+pad.l+'" y="'+(y+24)+'" font-size="11" fill="#647089">No data recorded.</text>';
+      }
+      var x=pad.l, barY=y+14, barH=34;
+      rows.forEach(function(r){
+        var w=(r.count/total)*iw;
+        var col=colors[r.key] || "#647089";
+        s+='<rect x="'+x+'" y="'+barY+'" width="'+Math.max(0,w-1)+'" height="'+barH+'" fill="'+col+'" opacity="0.92"/>';
+        if(w>76){
+          s+='<text x="'+(x+w/2)+'" y="'+(barY+21)+'" text-anchor="middle" font-size="10.5" font-weight="650" fill="#17202c">'+Math.round((r.count/total)*100)+'%</text>';
+        }
+        x+=w;
+      });
+      var lx=pad.l, ly=barY+barH+24;
+      rows.forEach(function(r){
+        var col=colors[r.key] || "#647089";
+        var txt=r.label+' · '+(valueLabel?valueLabel(r.count):r.count.toLocaleString());
+        s+='<rect x="'+lx+'" y="'+(ly-10)+'" width="9" height="9" rx="1.5" fill="'+col+'"/>';
+        s+='<text x="'+(lx+14)+'" y="'+ly+'" font-size="10.5" fill="#3a4456">'+txt+'</text>';
+        lx += Math.min(250, 82 + txt.length*5.4);
+        if(lx>820){lx=pad.l; ly+=18;}
+      });
+      return s;
+    }
+    var tierRows=D.tiers || [];
+    var sourceRows=D.sources || [];
+    var svg='';
+    svg += rowBar(tierRows,20,'Confidence tier split',tierColors,function(c){return c.toLocaleString()+' plants';});
+    svg += rowBar(sourceRows,122,'Source-channel contribution to plant composites',sourceColors,function(c){return c.toLocaleString()+' hours';});
+    document.getElementById("tiers").innerHTML=svg;
+  })();
 
   // ---------- DISTANCE BUCKETS ----------
   (function(){
