@@ -55,21 +55,33 @@ def test_expected_hours():
 
 def test_adequacy_tiers():
     temps = list(range(1, 1001))
+    # full coverage -> complete, publishable
     a = core.assess_adequacy(temps, expected_hours=1000)
-    check("adequacy complete tier", a.confidence_tier == "complete")
-    check("adequacy complete no review", a.needs_review is False)
-    check("adequacy ecwt rounded", approx(a.ecwt_f, 3.0))
-    check("adequacy tail count", a.tail_hours == 2)  # temps 1 and 2 are <= 2.998
+    check("complete tier", a.confidence_tier == "complete")
+    check("complete publishable", a.publishable is True)
+    check("complete coverage", approx(a.coverage, 1.0))
+    check("complete ecwt", approx(a.ecwt_f, 3.0))
+    check("complete tail", a.tail_hours == 2)  # temps 1 and 2 are <= 2.998
 
-    a2 = core.assess_adequacy(temps, expected_hours=1100)  # ~9% missing
-    check("adequacy adequate tier", a2.confidence_tier == "adequate")
+    # 1000/1052 = 95.1% -> adequate, still publishable
+    a2 = core.assess_adequacy(temps, expected_hours=1052)
+    check("adequate tier", a2.confidence_tier == "adequate")
+    check("adequate publishable", a2.publishable is True)
 
-    a3 = core.assess_adequacy(temps, expected_hours=2000)  # 50% missing
-    check("adequacy provisional tier", a3.confidence_tier == "provisional_review")
-    check("adequacy provisional needs review", a3.needs_review is True)
+    # 1000/2000 = 50% -> below the 95% floor -> held, NOT publishable
+    a3 = core.assess_adequacy(temps, expected_hours=2000)
+    check("below-floor tier", a3.confidence_tier == "provisional_review")
+    check("below-floor not publishable", a3.publishable is False)
+    check("below-floor needs review", a3.needs_review is True)
 
-    a4 = core.assess_adequacy([], expected_hours=53424)
-    check("adequacy blocked no data", a4.confidence_tier == "blocked_no_data")
+    # one reading vs a full winter -> the 88F bug: held, never published
+    a4 = core.assess_adequacy([88.2], expected_hours=55584)
+    check("tiny-sample held", a4.publishable is False)
+    check("tiny-sample tier", a4.confidence_tier == "provisional_review")
+
+    a5 = core.assess_adequacy([], expected_hours=53424)
+    check("blocked no data", a5.confidence_tier == "blocked_no_data")
+    check("blocked not publishable", a5.publishable is False)
 
 
 def test_composite_and_provenance():
