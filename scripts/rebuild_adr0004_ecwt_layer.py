@@ -1668,7 +1668,7 @@ def render_status_doc(
         "- The release is analytical and is not a Generator Owner compliance filing.",
         "- Existing `weather.hourly_djf.obs_timestamp` is backfilled to the canonical hour where the prior loader did not retain the raw NOAA `DATE` timestamp. Future loads should populate the raw observation timestamp directly.",
         "- Full composite hours are exposed by `calc.plant_ecwt_adr0004_composite_hour`; materialized audit rows are limited to cold-tail hours to avoid duplicating the primary-station series hundreds of millions of times.",
-        "- Known tiny-sample ECWT anomalies are documented in `docs/findings/adr0004_tiny_sample_ecwt_anomalies.md`; the one-hour 88 F cases are held with null public `ecwt_f` under ADR-0005.",
+        "- Known tiny-sample ECWT anomalies are documented in `docs/findings/adr0004_tiny_sample_ecwt_anomalies.md`; one-hour artifacts cannot publish under ADR-0005, and below-floor rows are held with null public `ecwt_f`.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
