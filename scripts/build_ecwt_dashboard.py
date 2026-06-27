@@ -3,7 +3,7 @@
 
 This is a *visualization* step, not a data step. It reads a published scoped
 plant ECWT release CSV (the wide variant that carries plant latitude/longitude,
-ECWT, plant state, and primary-station distance) and renders a single
+public ECWT, plant state, and primary-station distance) and renders a single
 self-contained HTML file: an interactive U.S. map, an ECWT distribution
 histogram, a sortable state ranking, and a station-distance data-quality panel.
 
@@ -11,7 +11,7 @@ Design intent (consistent with docs/publication_plan.md):
 
 - The repository tracks the *builder* (this script + viz/dashboard_template.html),
   never the generated HTML, which embeds ~1 MB of derived data. Publish the
-  rendered dashboard as a GitHub Pages page or a release asset with a checksum.
+- Rendered dashboards are committed when they are part of a promoted ECWT release.
 - The output is fully offline: no CDN, no external fonts, no network calls. All
   charts are hand-rendered with inline SVG/canvas.
 
@@ -23,7 +23,8 @@ Usage:
 The release CSV must contain these columns:
     plant_latitude, plant_longitude, ecwt_f, plant_state, plant_name
 and optionally:
-    primary_station_distance_km, confidence_tier, source_channels
+    primary_station_distance_km, confidence_tier, source_channels,
+    diagnostic_ecwt_f, publishable
 """
 
 from __future__ import annotations
@@ -99,6 +100,8 @@ def build_payload(release_csv: Path) -> dict:
     total_rows = 0
     rows_with_coords = 0
     rows_with_ecwt = 0
+    rows_with_diagnostic_ecwt = 0
+    held_rows = 0
     plotted_rows = 0
     needs_review_rows = 0
     first_release_id = None
@@ -121,6 +124,7 @@ def build_payload(release_csv: Path) -> dict:
             la = _f(row.get("plant_latitude"))
             lo = _f(row.get("plant_longitude"))
             e = _f(row.get("ecwt_f"))
+            diagnostic_e = _f(row.get("diagnostic_ecwt_f"))
             state = (row.get("plant_state") or "").strip()
             d = _f(row.get("primary_station_distance_km"))
             if d is None:
@@ -146,6 +150,10 @@ def build_payload(release_csv: Path) -> dict:
             reason = (row.get("reason") or "").strip()
             if _truthy(row.get("needs_review")):
                 needs_review_rows += 1
+            if diagnostic_e is not None:
+                rows_with_diagnostic_ecwt += 1
+            if tier in {"provisional_review", "blocked_no_data"} and e is None:
+                held_rows += 1
             if status:
                 statuses[status] = statuses.get(status, 0) + 1
             if tier:
@@ -190,7 +198,9 @@ def build_payload(release_csv: Path) -> dict:
         "plotted": plotted_rows,
         "rowsWithCoords": rows_with_coords,
         "rowsWithEcwt": rows_with_ecwt,
+        "rowsWithDiagnosticEcwt": rows_with_diagnostic_ecwt,
         "rowsMissingEcwt": total_rows - rows_with_ecwt,
+        "heldRows": held_rows,
         "states": len(by_state),
         "minF": round(min(vals), 1),
         "maxF": round(max(vals), 1),
@@ -216,7 +226,9 @@ def build_payload(release_csv: Path) -> dict:
         "within25pct": round(100 * dist["a"] / known_distance, 1) if known_distance else None,
         "plottedRows": plotted_rows,
         "rowsWithEcwt": rows_with_ecwt,
+        "rowsWithDiagnosticEcwt": rows_with_diagnostic_ecwt,
         "rowsMissingEcwt": total_rows - rows_with_ecwt,
+        "heldRows": held_rows,
         "rowsMissingCoords": total_rows - rows_with_coords,
         "needsReviewRows": needs_review_rows,
         "confidenceTiers": confidence_tiers,
