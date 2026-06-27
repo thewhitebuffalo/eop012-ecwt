@@ -8,6 +8,8 @@ Usage:
     python scripts/validate_ecwt_release.py --results-csv data/processed/<results>.csv
     python scripts/validate_ecwt_release.py --results-csv <results>.csv \
         --cold-tail-csv data/processed/<cold_tail>.csv
+    python scripts/validate_ecwt_release.py --results-csv <results>.csv \
+        --cold-tail-csv data/processed/<cold_tail_part*.csv>
 
 Exit code is non-zero if any hard check FAILs. See
 docs/validating_ecwt_release.md for the full write-up.
@@ -41,7 +43,7 @@ C_PUB = ["publishable", "is_publishable"]
 C_COV = ["coverage", "coverage_ratio", "fixed_period_coverage"]
 C_VALID = ["valid_hour_count", "valid_djf_hours", "valid_hours"]
 C_EXP = ["expected_hour_count", "expected_djf_hours", "expected_hours"]
-C_PID = ["eia_plant_code", "plant_code", "plant_id", "plant_name"]
+C_PID = ["plant_id", "eia_plant_code", "plant_code", "plant_name"]
 
 PUBLISHED_TIERS = {"complete", "adequate"}
 
@@ -77,12 +79,29 @@ def fnum(v):
     if v is None:
         return None
     v = str(v).strip()
-    if v == "" or v.lower() in ("na", "nan", "null", "none"):
+    if v == "" or v.lower() in ("na", "nan", "null", "none", "\\n"):
         return None
     try:
         return float(v)
     except ValueError:
         return None
+
+
+def normalize_coverage(v):
+    """Return coverage as a 0..1 ratio.
+
+    Composite fills can legitimately produce slightly more rows than the fixed
+    expected-hour denominator because duplicate source observations collapse
+    later in the calculation. Treat small overages as complete, while still
+    accepting percent-form values like 95 or 100.
+    """
+    if v is None:
+        return None
+    if v <= 1.0:
+        return v
+    if v <= 1.25:
+        return 1.0
+    return min(v / 100.0, 1.0)
 
 
 def pid(row, cols):
@@ -93,11 +112,11 @@ def coverage_of(row, cols):
     if cols.cov:
         c = fnum(row.get(cols.cov))
         if c is not None:
-            return c if c <= 1.0 else c / 100.0  # tolerate percent form
+            return normalize_coverage(c)
     if cols.valid and cols.exp:
         v, e = fnum(row.get(cols.valid)), fnum(row.get(cols.exp))
         if v is not None and e:
-            return v / e
+            return normalize_coverage(v / e)
     return None
 
 
@@ -219,19 +238,23 @@ def _resolve_cols(fieldnames):
                 exp=find_col(fieldnames, C_EXP), pid=find_col(fieldnames, C_PID))
 
 
-def _load_pids(path):
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        r = csv.DictReader(f)
-        c = find_col(r.fieldnames, C_PID)
-        if not c:
-            sys.exit(f"ERROR: cold-tail CSV has no plant-id column ({C_PID}).")
-        return {str(row[c]).strip() for row in r}
+def _load_pids(paths):
+    out = set()
+    for path in paths:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            r = csv.DictReader(f)
+            c = find_col(r.fieldnames, C_PID)
+            if not c:
+                sys.exit(f"ERROR: cold-tail CSV has no plant-id column ({C_PID}).")
+            out.update(str(row[c]).strip() for row in r)
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results-csv", required=True)
-    ap.add_argument("--cold-tail-csv", help="optional; enables the provenance check")
+    ap.add_argument("--cold-tail-csv", action="append", nargs="+",
+                    help="optional; enables the provenance check; accepts split files")
     ap.add_argument("--min-coverage", type=float, default=0.95)
     ap.add_argument("--warn-ecwt", type=float, default=60.0)
     ap.add_argument("--fail-ecwt", type=float, default=70.0)
@@ -242,7 +265,8 @@ def main():
         rd = csv.DictReader(f)
         rows = list(rd)
         cols = _resolve_cols(rd.fieldnames)
-    cold = _load_pids(a.cold_tail_csv) if a.cold_tail_csv else None
+    cold_paths = [p for group in (a.cold_tail_csv or []) for p in group]
+    cold = _load_pids(cold_paths) if cold_paths else None
     cfg = {"min_cov": a.min_coverage, "warn_ecwt": a.warn_ecwt,
            "fail_ecwt": a.fail_ecwt, "prior": a.prior_publishable}
 
