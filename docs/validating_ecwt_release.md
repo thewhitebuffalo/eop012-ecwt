@@ -21,6 +21,14 @@ python scripts/validate_ecwt_release.py \
   --cold-tail-csv data/processed/<cold_tail_hours>.csv
 ```
 
+For the committed ADR-0005 release, pass the split cold-tail parts together:
+
+```bash
+python scripts/validate_ecwt_release.py \
+  --results-csv data/processed/plant_ecwt_adr0004_20260626T235840Z_results.csv \
+  --cold-tail-csv data/processed/plant_ecwt_adr0004_20260626T235840Z_cold_tail_hours_part*.csv
+```
+
 Exit code is **0** unless a check FAILs, in which case it is **1** (so it can gate
 CI or a release step).
 
@@ -45,8 +53,9 @@ Column names are auto-detected (e.g. `ecwt_f`, `confidence_tier`/`tier`,
 `plant_state`, `coverage`/`coverage_ratio`, `valid_djf_hours` + `expected_djf_hours`,
 `eia_plant_code`/`plant_id`). If a coverage column is absent, coverage is derived
 from valid ÷ expected hours; if neither is present, `coverage_floor` is skipped
-with a WARN. The provenance check matches plant IDs across the two files, so both
-should expose a comparable plant-id column.
+with a WARN. Slightly over-complete coverage ratios are treated as complete. The
+provenance check matches plant IDs across the result file and one or more cold-tail
+files, so both should expose a comparable plant-id column.
 
 ## A good run looks like
 
