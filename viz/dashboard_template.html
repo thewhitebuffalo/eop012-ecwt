@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EOP-012 ADR-0004 ECWT Dashboard</title>
+<title>EOP-012 ADR-0005 ECWT Dashboard</title>
 <script>__ECWT_DATA__</script>
 <style>
   :root{
@@ -51,7 +51,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>EOP-012 ADR-0004 Extreme Cold Weather Temperature Dashboard</h1>
+    <h1>EOP-012 ADR-0005 Extreme Cold Weather Temperature Dashboard</h1>
     <div class="sub" id="sourceSub"></div>
   </header>
 
@@ -129,11 +129,11 @@
   document.getElementById("sourceSub").innerHTML =
     'Source: <code style="font-size:11px">'+releaseId+'</code>'+(runId?' · Run: <code style="font-size:11px">'+runId+'</code>':'')+' · '+
     D.kpis.plants.toLocaleString()+' policy rows · '+D.kpis.plotted.toLocaleString()+
-    ' plotted rows with coordinates and ECWT · coverage basis: '+(q.coverageBasis || 'fixed-period DJF since 2000');
+    ' plotted rows with coordinates and public ECWT · coverage basis: '+(q.coverageBasis || 'fixed-period DJF since 2000');
   var far100 = q.far100 || 0;
   var farPct = q.far100pct == null ? 0 : q.far100pct;
   document.getElementById("qualityBanner").innerHTML =
-    '<b>ADR-0004 analytical release.</b> Every non-AK plant with observed weather data receives ECWT plus a confidence tier; only zero-data plants are blocked. Complete is the strict ADR-0002-style tier. '+(q.publicationCaveat || 'Analytical output; not a compliance filing.');
+    '<b>ADR-0005 analytical release.</b> Public ECWT is written only for complete/adequate rows at or above the 95% winter-hour coverage floor. Provisional rows are held with null public ECWT and retained diagnostic values. '+(q.publicationCaveat || 'Analytical output; not a compliance filing.');
   document.getElementById("distSub").innerHTML = q.knownDistance
     ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
@@ -141,19 +141,19 @@
       ' rows ('+farPct+'%) are 100 km or farther away.'
     : "How far is each plant's assigned primary weather station? No station-distance values were recorded in the input CSV.";
   document.getElementById("histSub").innerHTML =
-    '3&deg;F bins. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct ECWT values in this release: '+
+    '3&deg;F bins of public ECWT values. Dashed line = 32&deg;F EOP-012 applicability threshold. Distinct public ECWT values in this release: '+
     D.kpis.distinct+'.';
   document.getElementById("tierSub").innerHTML =
     tierReady.toLocaleString()+' plants are complete/adequate; '+provisional.toLocaleString()+
-    ' are provisional review; '+blocked.toLocaleString()+' are blocked for no observed station data. Source bars show plant-composite hour contributions, not unique raw NOAA observations.';
+    ' are provisional review; '+blocked.toLocaleString()+' are blocked for no observed station data. Provisional and blocked rows have null public ECWT. Source bars show plant-composite hour contributions, not unique raw NOAA observations.';
 
   // ---------- KPIs ----------
   var k=D.kpis;
   var cards=[
     ["v "+k.plants.toLocaleString(),"Policy rows"],
-    [k.rowsWithEcwt.toLocaleString(),"Rows with ECWT"],
+    [k.rowsWithEcwt.toLocaleString(),"Rows with public ECWT"],
     [tierReady.toLocaleString(),"Complete/adequate"],
-    [provisional.toLocaleString(),"Provisional review","flag"],
+    [(k.heldRows || provisional).toLocaleString(),"Held/null public ECWT","flag"],
     [blocked.toLocaleString(),"Blocked no data","flag"],
     [k.below32pct+"%","ECWT &lt; 32&deg;F among ECWT rows","flag"],
     [fmt(k.meanF)+"&deg;","Mean ECWT"],

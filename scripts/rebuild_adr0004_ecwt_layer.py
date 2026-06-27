@@ -23,18 +23,19 @@ from typing import Iterable, Iterator
 
 from ecwt_core import (
     HourObs,
+    MIN_PUBLISH_COVERAGE,
     assess_adequacy,
     build_composite,
-    ecwt_discrete_rank_temp,
-    ecwt_percentile,
     expected_djf_hours,
     provenance_summary,
 )
 from eop012_config import PROJECT_ROOT, PSQL
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.4.0-adr0004"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.5.0-adr0005"
 DEFAULT_CANDIDATE_PREFIX = "noaa_station_candidates_"
+DEFAULT_RUN_ID = "plant_ecwt_adr0004_20260626T235840Z"
+DEFAULT_RELEASE_ID = "scoped_plant_ecwt_adr0004_release_20260626T235840Z"
 SOURCE_CHANNELS = (
     "noaa_global_hourly_aws",
     "noaa_lcd_cdo",
@@ -67,10 +68,18 @@ RESULT_FIELDS = [
     "missing_hour_count",
     "missing_frac",
     "coverage_ratio",
+    "publishable",
     "ecwt_f",
     "ecwt_c",
     "ecwt_discrete_f",
     "ecwt_discrete_c",
+    "diagnostic_ecwt_f",
+    "diagnostic_ecwt_c",
+    "diagnostic_ecwt_discrete_f",
+    "diagnostic_ecwt_discrete_c",
+    "hours_short_of_publish_floor",
+    "towers_tried_count",
+    "towers_tried_json",
     "discrete_rank",
     "tail_hour_count",
     "confidence_tier",
@@ -133,6 +142,8 @@ RELEASE_FIELDS = [
     "primary_station_rank_order",
     "ecwt_f",
     "ecwt_discrete_f",
+    "diagnostic_ecwt_f",
+    "diagnostic_ecwt_discrete_f",
     "confidence_tier",
     "needs_review",
     "reason",
@@ -141,7 +152,11 @@ RELEASE_FIELDS = [
     "missing_hour_count",
     "missing_frac",
     "coverage_ratio",
+    "publishable",
+    "hours_short_of_publish_floor",
     "coverage_basis",
+    "towers_tried_count",
+    "towers_tried",
     "contributing_towers",
     "source_channels",
     "filled_hour_count",
@@ -392,10 +407,18 @@ create table if not exists calc.plant_ecwt_adr0004_result (
     missing_hour_count bigint not null,
     missing_frac numeric,
     coverage_ratio numeric,
+    publishable boolean not null default false,
     ecwt_f numeric,
     ecwt_c numeric,
     ecwt_discrete_f numeric,
     ecwt_discrete_c numeric,
+    diagnostic_ecwt_f numeric,
+    diagnostic_ecwt_c numeric,
+    diagnostic_ecwt_discrete_f numeric,
+    diagnostic_ecwt_discrete_c numeric,
+    hours_short_of_publish_floor bigint,
+    towers_tried_count integer,
+    towers_tried jsonb not null default '[]'::jsonb,
     discrete_rank integer,
     tail_hour_count bigint not null default 0,
     confidence_tier text not null,
@@ -418,6 +441,16 @@ create index if not exists ix_plant_ecwt_adr0004_run_tier
     on calc.plant_ecwt_adr0004_result (adr0004_run_id, confidence_tier);
 create index if not exists ix_plant_ecwt_adr0004_plant
     on calc.plant_ecwt_adr0004_result (plant_id);
+
+alter table calc.plant_ecwt_adr0004_result
+    add column if not exists publishable boolean not null default false,
+    add column if not exists diagnostic_ecwt_f numeric,
+    add column if not exists diagnostic_ecwt_c numeric,
+    add column if not exists diagnostic_ecwt_discrete_f numeric,
+    add column if not exists diagnostic_ecwt_discrete_c numeric,
+    add column if not exists hours_short_of_publish_floor bigint,
+    add column if not exists towers_tried_count integer,
+    add column if not exists towers_tried jsonb not null default '[]'::jsonb;
 
 create table if not exists calc.plant_ecwt_adr0004_source (
     adr0004_run_id text not null references audit.calculation_run(calculation_run_id),
@@ -572,7 +605,7 @@ def parse_int(value: str | None) -> int | None:
     return int(float(str(value)))
 
 
-def load_targets(
+def iter_target_candidates(
     psql: Path,
     host: str,
     port: int,
@@ -581,62 +614,102 @@ def load_targets(
     station_candidate_run_id: str,
     include_ak: bool,
     limit_plants: int | None = None,
-) -> list[dict[str, str]]:
+) -> Iterator[dict[str, object]]:
     state_filter = "true" if include_ak else "coalesce(p.state, '') <> 'AK'"
     limit_clause = "" if not limit_plants else f"limit {int(limit_plants)}"
-    return psql_csv_query(
-        psql,
-        host,
-        port,
-        dbname,
-        user,
-        f"""
-        with candidate_weather as (
+    query = f"""
+        with target_plants as (
+            select
+                p.plant_id,
+                p.eia_plant_code,
+                p.plant_name,
+                coalesce(p.utility_id, '') as utility_id,
+                coalesce(p.utility_name, '') as utility_name,
+                coalesce(p.state, '') as plant_state,
+                coalesce(p.county, '') as plant_county,
+                coalesce(round(p.latitude, 6)::text, '') as plant_latitude,
+                coalesce(round(p.longitude, 6)::text, '') as plant_longitude,
+                coalesce(p.nerc_region, '') as nerc_region,
+                coalesce(p.balancing_authority_code, '') as balancing_authority_code,
+                coalesce(p.balancing_authority_name, '') as balancing_authority_name,
+                coalesce(p.sector_name, '') as sector_name,
+                p.latitude,
+                p.longitude
+            from asset.plant p
+            where {state_filter}
+            order by p.state, p.latitude nulls last, p.longitude nulls last,
+                     p.eia_plant_code::integer nulls last, p.plant_id
+            {limit_clause}
+        ),
+        candidate_weather as (
             select
                 sc.plant_id,
                 sc.station_id,
                 sc.distance_km,
-                sc.rank_order,
-                row_number() over (
-                    partition by sc.plant_id
-                    order by sc.rank_order nulls last, sc.distance_km nulls last, sc.station_id
-                ) as rn
+                sc.rank_order
             from link.station_candidate sc
             where sc.calculation_run_id = {sql_literal(station_candidate_run_id)}
               and sc.candidate_status in ('candidate', 'selected')
-              and exists (
-                  select 1
-                  from weather.station_year_hourly_summary sy
-                  where sy.station_id = sc.station_id
-                    and sy.valid_djf_hours > 0
-              )
         )
         select
             p.plant_id,
             p.eia_plant_code,
             p.plant_name,
-            coalesce(p.utility_id, '') as utility_id,
-            coalesce(p.utility_name, '') as utility_name,
-            coalesce(p.state, '') as plant_state,
-            coalesce(p.county, '') as plant_county,
-            coalesce(round(p.latitude, 6)::text, '') as plant_latitude,
-            coalesce(round(p.longitude, 6)::text, '') as plant_longitude,
-            coalesce(p.nerc_region, '') as nerc_region,
-            coalesce(p.balancing_authority_code, '') as balancing_authority_code,
-            coalesce(p.balancing_authority_name, '') as balancing_authority_name,
-            coalesce(p.sector_name, '') as sector_name,
-            coalesce(cw.station_id, '') as primary_station_id,
-            coalesce(round(cw.distance_km, 3)::text, '') as primary_station_distance_km,
-            coalesce(cw.rank_order::text, '') as primary_station_rank_order
-        from asset.plant p
+            p.utility_id,
+            p.utility_name,
+            p.plant_state,
+            p.plant_county,
+            p.plant_latitude,
+            p.plant_longitude,
+            p.nerc_region,
+            p.balancing_authority_code,
+            p.balancing_authority_name,
+            p.sector_name,
+            coalesce(cw.station_id, '') as station_id,
+            coalesce(round(cw.distance_km, 3)::text, '') as distance_km,
+            coalesce(cw.rank_order::text, '') as rank_order
+        from target_plants p
         left join candidate_weather cw
           on cw.plant_id = p.plant_id
-         and cw.rn = 1
-        where {state_filter}
-        order by p.state, p.eia_plant_code::integer nulls last, p.plant_id
-        {limit_clause}
-        """,
-    )
+        order by p.plant_state, p.latitude nulls last, p.longitude nulls last,
+                 p.eia_plant_code::integer nulls last, p.plant_id,
+                 cw.rank_order nulls last, cw.distance_km nulls last, cw.station_id
+        """
+    current: dict[str, object] | None = None
+    candidates: list[dict[str, object]] = []
+    for row in psql_csv_stream(psql, host, port, dbname, user, query):
+        if current is not None and row["plant_id"] != current["plant_id"]:
+            current["candidates"] = candidates
+            yield current
+            current = None
+            candidates = []
+        if current is None:
+            current = {
+                "plant_id": row["plant_id"],
+                "eia_plant_code": row["eia_plant_code"],
+                "plant_name": row["plant_name"],
+                "utility_id": row["utility_id"],
+                "utility_name": row["utility_name"],
+                "plant_state": row["plant_state"],
+                "plant_county": row["plant_county"],
+                "plant_latitude": row["plant_latitude"],
+                "plant_longitude": row["plant_longitude"],
+                "nerc_region": row["nerc_region"],
+                "balancing_authority_code": row["balancing_authority_code"],
+                "balancing_authority_name": row["balancing_authority_name"],
+                "sector_name": row["sector_name"],
+            }
+        if row.get("station_id"):
+            candidates.append(
+                {
+                    "station_id": row["station_id"],
+                    "distance_km": row.get("distance_km") or "",
+                    "rank_order": row.get("rank_order") or "",
+                }
+            )
+    if current is not None:
+        current["candidates"] = candidates
+        yield current
 
 
 def observation_query(station_ids: Iterable[str]) -> str:
@@ -694,10 +767,104 @@ def iter_station_observations(
         yield current_station, obs, raw_rows
 
 
+class StationObservationCache:
+    def __init__(
+        self,
+        psql: Path,
+        host: str,
+        port: int,
+        dbname: str,
+        user: str | None,
+        max_items: int,
+    ) -> None:
+        self.psql = psql
+        self.host = host
+        self.port = port
+        self.dbname = dbname
+        self.user = user
+        self.max_items = max(1, max_items)
+        self.cache: OrderedDict[str, tuple[list[HourObs], dict[str, tuple[str, str]]]] = OrderedDict()
+        self.loads = 0
+        self.batch_loads = 0
+        self.hits = 0
+
+    def get(self, station_id: str) -> tuple[list[HourObs], dict[str, tuple[str, str]]]:
+        return self.get_many([station_id])[station_id]
+
+    def get_many(
+        self,
+        station_ids: Iterable[str],
+    ) -> dict[str, tuple[list[HourObs], dict[str, tuple[str, str]]]]:
+        ordered_ids = list(dict.fromkeys(station_ids))
+        missing: list[str] = []
+        for station_id in ordered_ids:
+            cached = self.cache.get(station_id)
+            if cached is None:
+                missing.append(station_id)
+            else:
+                self.hits += 1
+                self.cache.move_to_end(station_id)
+        if missing:
+            loaded: dict[str, tuple[list[HourObs], dict[str, tuple[str, str]]]] = {
+                station_id: ([], {}) for station_id in missing
+            }
+            for row in psql_csv_stream(
+                self.psql,
+                self.host,
+                self.port,
+                self.dbname,
+                self.user,
+                observation_query(missing),
+            ):
+                station_id = row["station_id"]
+                obs_list, raw_by_hour = loaded[station_id]
+                obs_list.append(
+                    HourObs(
+                        row["hour_ending_utc"],
+                        float(row["dry_bulb_f"]),
+                        station_id,
+                        row["source_channel"] or "noaa_isd_local_cache",
+                        row.get("source_code") or "",
+                        row.get("report_type") or "",
+                        row.get("source_file_id") or None,
+                        False,
+                    )
+                )
+                raw_by_hour[row["hour_ending_utc"]] = (
+                    row.get("hour_local") or "",
+                    row.get("obs_timestamp") or row["hour_ending_utc"],
+                )
+            self.batch_loads += 1
+            for station_id in missing:
+                self.loads += 1
+                self.cache[station_id] = loaded[station_id]
+                self.cache.move_to_end(station_id)
+                while len(self.cache) > self.max_items:
+                    self.cache.popitem(last=False)
+        return {station_id: self.cache[station_id] for station_id in ordered_ids}
+
 def ecwt_c_from_f(value: float | None) -> float | None:
     if value is None or math.isnan(value):
         return None
     return round((value - 32.0) * 5.0 / 9.0, 3)
+
+
+def publish_floor_hours(expected_hours: int) -> int:
+    return math.ceil(expected_hours * MIN_PUBLISH_COVERAGE)
+
+
+def coverage_bin(coverage: float) -> str:
+    if coverage >= 0.99:
+        return ">=99%"
+    if coverage >= 0.95:
+        return "95-99%"
+    if coverage >= 0.80:
+        return "80-95%"
+    if coverage >= 0.50:
+        return "50-80%"
+    if coverage > 0:
+        return "0-50%"
+    return "0%"
 
 
 def result_base(
@@ -727,15 +894,23 @@ def result_base(
             ("missing_hour_count", expected_hours),
             ("missing_frac", 1.0),
             ("coverage_ratio", 0.0),
+            ("publishable", False),
             ("ecwt_f", None),
             ("ecwt_c", None),
             ("ecwt_discrete_f", None),
             ("ecwt_discrete_c", None),
+            ("diagnostic_ecwt_f", None),
+            ("diagnostic_ecwt_c", None),
+            ("diagnostic_ecwt_discrete_f", None),
+            ("diagnostic_ecwt_discrete_c", None),
+            ("hours_short_of_publish_floor", publish_floor_hours(expected_hours)),
+            ("towers_tried_count", 0),
+            ("towers_tried_json", json.dumps([], sort_keys=True)),
             ("discrete_rank", None),
             ("tail_hour_count", 0),
             ("confidence_tier", "blocked_no_data"),
             ("needs_review", True),
-            ("reason", "no candidate station with valid observed DJF data"),
+            ("reason", "no candidate station with observed DJF data"),
             ("coverage_basis", f"{COVERAGE_BASIS_PREFIX} through {calc_date.isoformat()}"),
             ("gap_calendar_basis", "zero observed composite hours; ECWT blocked"),
             ("provenance_summary_json", json.dumps({}, sort_keys=True)),
@@ -770,6 +945,8 @@ def release_row_from_result(row: OrderedDict[str, object], plant: dict[str, str]
             ("primary_station_rank_order", row["primary_station_rank_order"]),
             ("ecwt_f", row["ecwt_f"]),
             ("ecwt_discrete_f", row["ecwt_discrete_f"]),
+            ("diagnostic_ecwt_f", row["diagnostic_ecwt_f"]),
+            ("diagnostic_ecwt_discrete_f", row["diagnostic_ecwt_discrete_f"]),
             ("confidence_tier", row["confidence_tier"]),
             ("needs_review", row["needs_review"]),
             ("reason", row["reason"]),
@@ -778,7 +955,11 @@ def release_row_from_result(row: OrderedDict[str, object], plant: dict[str, str]
             ("missing_hour_count", row["missing_hour_count"]),
             ("missing_frac", row["missing_frac"]),
             ("coverage_ratio", row["coverage_ratio"]),
+            ("publishable", row["publishable"]),
+            ("hours_short_of_publish_floor", row["hours_short_of_publish_floor"]),
             ("coverage_basis", row["coverage_basis"]),
+            ("towers_tried_count", row["towers_tried_count"]),
+            ("towers_tried", row["towers_tried_json"]),
             ("contributing_towers", row["contributing_towers_json"]),
             ("source_channels", row["source_channels_json"]),
             ("filled_hour_count", json.loads(str(row["provenance_summary_json"] or "{}")).get("filled_hours", 0)),
@@ -801,26 +982,12 @@ def build_outputs(
     calc_date: date,
     include_ak: bool,
     limit_plants: int | None,
+    station_cache_size: int,
+    station_batch_size: int,
 ) -> OrderedDict[str, object]:
     expected_hours = expected_djf_hours(calc_date)
-    targets = load_targets(
-        psql,
-        host,
-        port,
-        dbname,
-        user,
-        station_candidate_run_id,
-        include_ak,
-        limit_plants,
-    )
-    plants_by_station: dict[str, list[dict[str, str]]] = defaultdict(list)
-    blocked_plants: list[dict[str, str]] = []
-    for plant in targets:
-        station_id = plant.get("primary_station_id") or ""
-        if station_id:
-            plants_by_station[station_id].append(plant)
-        else:
-            blocked_plants.append(plant)
+    floor_hours = publish_floor_hours(expected_hours)
+    station_cache = StationObservationCache(psql, host, port, dbname, user, station_cache_size)
 
     processed_dir = project_root / "data" / "processed"
     results_csv = processed_dir / f"{run_id}_results.csv"
@@ -834,53 +1001,137 @@ def build_outputs(
     release_writer = write_csv_header(release_csv, RELEASE_FIELDS)
 
     tier_counts: Counter[str] = Counter()
+    coverage_counts: Counter[str] = Counter()
     result_rows = 0
     release_rows = 0
     tail_rows = 0
-    stations_processed = 0
+    target_plants = 0
+    plants_with_observed_composite = 0
+    blocked_no_data = 0
     rows_with_ecwt = 0
-    station_ids = set(plants_by_station)
 
     try:
-        for station_id, primary_obs, raw_rows in iter_station_observations(
-            psql, host, port, dbname, user, station_ids
+        for plant in iter_target_candidates(
+            psql,
+            host,
+            port,
+            dbname,
+            user,
+            station_candidate_run_id,
+            include_ak,
+            limit_plants,
         ):
-            stations_processed += 1
-            composite = build_composite(primary_obs, [])
+            target_plants += 1
+            candidates = list(plant.get("candidates") or [])
+            primary = candidates[0] if candidates else None
+            if primary:
+                plant["primary_station_id"] = primary["station_id"]
+                plant["primary_station_distance_km"] = primary.get("distance_km") or ""
+                plant["primary_station_rank_order"] = primary.get("rank_order") or ""
+
+            row = result_base(run_id, release_id, plant, calc_date, expected_hours)
+            primary_obs: list[HourObs] = []
+            fill_obs_lists: list[list[HourObs]] = []
+            source_rows: list[dict[str, object]] = []
+            raw_maps: dict[str, dict[str, tuple[str, str]]] = {}
+            occupied_hours: set[str] = set()
+            towers_tried: list[str] = []
+
+            priority_start = 0
+            batch_size = max(1, station_batch_size)
+            while priority_start < len(candidates) and len(occupied_hours) < expected_hours:
+                batch = candidates[priority_start:priority_start + batch_size]
+                station_data = station_cache.get_many(str(c["station_id"]) for c in batch)
+                for offset, candidate in enumerate(batch):
+                    priority = priority_start + offset
+                    station_id = str(candidate["station_id"])
+                    obs, raw_by_hour = station_data[station_id]
+                    raw_maps[station_id] = raw_by_hour
+                    towers_tried.append(station_id)
+                    if priority == 0:
+                        useful_obs = obs
+                    else:
+                        useful_obs = [o for o in obs if o.hour_ending_utc not in occupied_hours]
+                    for obs_hour in useful_obs:
+                        occupied_hours.add(obs_hour.hour_ending_utc)
+                    if priority == 0:
+                        primary_obs = useful_obs
+                    else:
+                        fill_obs_lists.append(useful_obs)
+                    role = "primary" if priority == 0 else "fill"
+                    used_hours = len(useful_obs)
+                    if priority == 0 or used_hours:
+                        source_rows.append(
+                            {
+                                "adr0004_run_id": run_id,
+                                "plant_id": plant["plant_id"],
+                                "station_id": station_id,
+                                "role": role,
+                                "fill_priority": priority,
+                                "distance_km": candidate.get("distance_km") or None,
+                                "rank_order": candidate.get("rank_order") or None,
+                                "used_hour_count": used_hours,
+                                "filled_hour_count": 0 if priority == 0 else used_hours,
+                            }
+                        )
+                    if len(occupied_hours) >= expected_hours:
+                        break
+                priority_start += len(batch)
+
+            row["towers_tried_count"] = len(towers_tried)
+            row["towers_tried_json"] = json.dumps(towers_tried, sort_keys=True)
+
+            composite = build_composite(primary_obs, fill_obs_lists)
             temps = [obs.dry_bulb_f for obs in composite]
-            raw_ecwt = ecwt_percentile(temps)
-            raw_discrete = ecwt_discrete_rank_temp(temps)
-            adequacy = assess_adequacy(temps, expected_hours)
-            summary = provenance_summary(composite, raw_ecwt)
-            cutoff = max((row["hour_ending_utc"] for row in raw_rows), default=None)
-            tail_pairs = [
-                (obs, raw)
-                for obs, raw in zip(composite, raw_rows, strict=True)
-                if obs.dry_bulb_f <= raw_ecwt
-            ]
-            discrete_rank = max(1, math.ceil(0.002 * len(temps)))
-            for plant in plants_by_station[station_id]:
-                row = result_base(run_id, release_id, plant, calc_date, expected_hours)
+            if temps:
+                plants_with_observed_composite += 1
+                adequacy = assess_adequacy(temps, expected_hours)
+                diagnostic_ecwt = adequacy.ecwt_f
+                diagnostic_discrete = adequacy.ecwt_discrete_f
+                public_ecwt = adequacy.ecwt_f if adequacy.publishable else None
+                public_discrete = adequacy.ecwt_discrete_f if adequacy.publishable else None
+                summary = provenance_summary(composite, diagnostic_ecwt)
+                tail_obs = [obs for obs in composite if obs.dry_bulb_f <= diagnostic_ecwt]
+                discrete_rank = max(1, math.ceil(0.002 * len(temps)))
+                hours_short = max(0, floor_hours - adequacy.n)
+                coverage = round(adequacy.n / expected_hours, 6)
+                if public_ecwt is not None and coverage < MIN_PUBLISH_COVERAGE:
+                    raise RuntimeError(
+                        f"public ECWT sanity failed for {plant['plant_id']}: "
+                        f"coverage={coverage}, ecwt_f={public_ecwt}"
+                    )
+                if not adequacy.publishable and public_ecwt is not None:
+                    raise RuntimeError(
+                        f"held-row sanity failed for {plant['plant_id']}: "
+                        f"tier={adequacy.confidence_tier}, ecwt_f={public_ecwt}"
+                    )
                 row.update(
                     {
-                        "calculation_cutoff_utc": cutoff,
+                        "calculation_cutoff_utc": max((obs.hour_ending_utc for obs in composite), default=None),
                         "valid_hour_count": adequacy.n,
                         "missing_hour_count": adequacy.missing_hours,
-                        "missing_frac": adequacy.missing_frac,
-                        "coverage_ratio": round(adequacy.n / expected_hours, 6) if expected_hours else None,
-                        "ecwt_f": adequacy.ecwt_f,
-                        "ecwt_c": ecwt_c_from_f(raw_ecwt),
-                        "ecwt_discrete_f": round(raw_discrete, 1),
-                        "ecwt_discrete_c": ecwt_c_from_f(raw_discrete),
+                        "missing_frac": round(1.0 - coverage, 6),
+                        "coverage_ratio": coverage,
+                        "publishable": adequacy.publishable,
+                        "ecwt_f": public_ecwt,
+                        "ecwt_c": ecwt_c_from_f(public_ecwt),
+                        "ecwt_discrete_f": public_discrete,
+                        "ecwt_discrete_c": ecwt_c_from_f(public_discrete),
+                        "diagnostic_ecwt_f": diagnostic_ecwt,
+                        "diagnostic_ecwt_c": ecwt_c_from_f(diagnostic_ecwt),
+                        "diagnostic_ecwt_discrete_f": diagnostic_discrete,
+                        "diagnostic_ecwt_discrete_c": ecwt_c_from_f(diagnostic_discrete),
+                        "hours_short_of_publish_floor": hours_short,
                         "discrete_rank": discrete_rank,
-                        "tail_hour_count": len(tail_pairs),
+                        "tail_hour_count": len(tail_obs),
                         "confidence_tier": adequacy.confidence_tier,
                         "needs_review": adequacy.needs_review,
                         "reason": adequacy.reason,
                         "gap_calendar_basis": (
-                            "actual missing-hour timestamps remain possible cold-tail hours; review required"
+                            f"{hours_short} more populated winter hours needed to meet the "
+                            f"{MIN_PUBLISH_COVERAGE:.0%} publish floor"
                             if adequacy.confidence_tier == "provisional_review"
-                            else "automated ADR-0004 missing-fraction tier; no rigid publication gate applied"
+                            else "ADR-0005 publish floor met; public ECWT written"
                         ),
                         "provenance_summary_json": json.dumps(summary, sort_keys=True),
                         "contributing_towers_json": json.dumps(summary["towers"], sort_keys=True),
@@ -890,30 +1141,20 @@ def build_outputs(
                         ),
                     }
                 )
-                writerow(result_writer, row)
-                writerow(
-                    source_writer,
-                    {
-                        "adr0004_run_id": run_id,
-                        "plant_id": plant["plant_id"],
-                        "station_id": station_id,
-                        "role": "primary",
-                        "fill_priority": 0,
-                        "distance_km": plant.get("primary_station_distance_km") or None,
-                        "rank_order": plant.get("primary_station_rank_order") or None,
-                        "used_hour_count": adequacy.n,
-                        "filled_hour_count": 0,
-                    },
-                )
-                for obs, raw in tail_pairs:
+                for source_row in source_rows:
+                    writerow(source_writer, source_row)
+                for obs in tail_obs:
+                    hour_local, obs_timestamp = raw_maps.get(obs.station_id, {}).get(
+                        obs.hour_ending_utc, ("", obs.hour_ending_utc)
+                    )
                     writerow(
                         cold_writer,
                         {
                             "adr0004_run_id": run_id,
                             "plant_id": plant["plant_id"],
-                            "hour_ending_utc": raw["hour_ending_utc"],
-                            "hour_local": raw.get("hour_local") or None,
-                            "obs_timestamp": raw.get("obs_timestamp") or raw["hour_ending_utc"],
+                            "hour_ending_utc": obs.hour_ending_utc,
+                            "hour_local": hour_local or None,
+                            "obs_timestamp": obs_timestamp or obs.hour_ending_utc,
                             "station_id": obs.station_id,
                             "dry_bulb_f": round(obs.dry_bulb_f, 3),
                             "source_channel": obs.source_channel,
@@ -924,18 +1165,23 @@ def build_outputs(
                         },
                     )
                     tail_rows += 1
-                writerow(release_writer, release_row_from_result(row, plant))
-                tier_counts[str(row["confidence_tier"])] += 1
-                result_rows += 1
-                release_rows += 1
-                rows_with_ecwt += 1
+                if public_ecwt is not None:
+                    rows_with_ecwt += 1
+            else:
+                blocked_no_data += 1
+                row["reason"] = (
+                    "candidate towers tried but no valid observed DJF hours"
+                    if candidates
+                    else "no candidate station available"
+                )
+                row["gap_calendar_basis"] = "zero observed composite hours; ECWT blocked"
+                for source_row in source_rows:
+                    writerow(source_writer, source_row)
 
-        processed_plants = result_rows
-        for plant in blocked_plants:
-            row = result_base(run_id, release_id, plant, calc_date, expected_hours)
             writerow(result_writer, row)
             writerow(release_writer, release_row_from_result(row, plant))
-            tier_counts["blocked_no_data"] += 1
+            tier_counts[str(row["confidence_tier"])] += 1
+            coverage_counts[coverage_bin(float(row["coverage_ratio"] or 0.0))] += 1
             result_rows += 1
             release_rows += 1
     finally:
@@ -951,15 +1197,19 @@ def build_outputs(
             ("station_candidate_run_id", station_candidate_run_id),
             ("calculation_date", calc_date.isoformat()),
             ("expected_djf_hours", expected_hours),
-            ("target_plants", len(targets)),
-            ("plants_with_station_weather", processed_plants),
-            ("blocked_no_station_weather", len(blocked_plants)),
-            ("stations_processed", stations_processed),
+            ("publish_floor_hours", floor_hours),
+            ("target_plants", target_plants),
+            ("plants_with_observed_composite", plants_with_observed_composite),
+            ("blocked_no_data", blocked_no_data),
+            ("stations_loaded", station_cache.loads),
+            ("station_batch_loads", station_cache.batch_loads),
+            ("station_cache_hits", station_cache.hits),
             ("result_rows", result_rows),
             ("release_rows", release_rows),
             ("rows_with_ecwt", rows_with_ecwt),
             ("cold_tail_rows", tail_rows),
             ("confidence_tier_counts", dict(sorted(tier_counts.items()))),
+            ("coverage_distribution", dict(sorted(coverage_counts.items()))),
             ("results_csv", str(results_csv)),
             ("sources_csv", str(sources_csv)),
             ("cold_tail_csv", str(cold_tail_csv)),
@@ -982,10 +1232,11 @@ def create_load_sql(
     release_csv = Path(str(outputs["release_csv"]))
     release_sha = sha256_file(release_csv)
     params = {
-        "adr": "ADR-0004",
+        "adr": "ADR-0005",
         "station_candidate_run_id": outputs["station_candidate_run_id"],
         "calculation_date": outputs["calculation_date"],
         "expected_djf_hours": outputs["expected_djf_hours"],
+        "min_publish_coverage": MIN_PUBLISH_COVERAGE,
         "release_id": release_id,
     }
     result_temp = ",\n    ".join(f"{field} text" for field in RESULT_FIELDS)
@@ -998,10 +1249,10 @@ insert into audit.methodology_version (
     methodology_version, methodology_name, effective_at_utc, source_standard, notes
 ) values (
     {sql_literal(METHODOLOGY_VERSION)},
-    'ADR-0004 observational ECWT calculation layer',
+    'ADR-0005 observational ECWT calculation layer',
     {sql_literal(started_at.isoformat())}::timestamptz,
     'NERC EOP-012-3 / Calculating Extreme Cold Weather Temperature',
-    'Observational-only ECWT with adequacy confidence tiers and cold-tail provenance.'
+    'Observational-only ECWT with 95% publication floor, diagnostic held values, and cold-tail provenance.'
 ) on conflict (methodology_version) do update set
     notes = excluded.notes;
 
@@ -1016,7 +1267,7 @@ insert into audit.calculation_run (
     now(),
     'succeeded',
     {sql_literal(json.dumps(params, sort_keys=True))}::jsonb,
-    'Rebuilt ADR-0004 plant ECWT layer using scripts/ecwt_core.py helpers.'
+    'Rebuilt ADR-0005 plant ECWT layer using scripts/ecwt_core.py helpers.'
 ) on conflict (calculation_run_id) do update set
     code_commit = excluded.code_commit,
     run_finished_at_utc = excluded.run_finished_at_utc,
@@ -1038,6 +1289,26 @@ create temp table tmp_adr0004_tail (
 \\copy tmp_adr0004_source ({", ".join(SOURCE_FIELDS)}) from {sql_literal(str(sources_csv))} with (format csv, header true, null '\\N')
 \\copy tmp_adr0004_tail ({", ".join(COLD_TAIL_FIELDS)}) from {sql_literal(str(cold_tail_csv))} with (format csv, header true, null '\\N')
 
+do $$
+begin
+    if exists (
+        select 1
+        from tmp_adr0004_result
+        where nullif(ecwt_f, '') is not null
+          and nullif(coverage_ratio, '')::numeric < {MIN_PUBLISH_COVERAGE}
+    ) then
+        raise exception 'ADR-0005 sanity failed: public ecwt_f exists below publish floor';
+    end if;
+    if exists (
+        select 1
+        from tmp_adr0004_result
+        where confidence_tier in ('provisional_review', 'blocked_no_data')
+          and nullif(ecwt_f, '') is not null
+    ) then
+        raise exception 'ADR-0005 sanity failed: held/blocked row carries public ecwt_f';
+    end if;
+end $$;
+
 insert into calc.plant_ecwt_adr0004_result (
     adr0004_result_id,
     adr0004_run_id,
@@ -1057,10 +1328,18 @@ insert into calc.plant_ecwt_adr0004_result (
     missing_hour_count,
     missing_frac,
     coverage_ratio,
+    publishable,
     ecwt_f,
     ecwt_c,
     ecwt_discrete_f,
     ecwt_discrete_c,
+    diagnostic_ecwt_f,
+    diagnostic_ecwt_c,
+    diagnostic_ecwt_discrete_f,
+    diagnostic_ecwt_discrete_c,
+    hours_short_of_publish_floor,
+    towers_tried_count,
+    towers_tried,
     discrete_rank,
     tail_hour_count,
     confidence_tier,
@@ -1093,10 +1372,18 @@ select
     missing_hour_count::bigint,
     nullif(missing_frac, '')::numeric,
     nullif(coverage_ratio, '')::numeric,
+    publishable::boolean,
     nullif(ecwt_f, '')::numeric,
     nullif(ecwt_c, '')::numeric,
     nullif(ecwt_discrete_f, '')::numeric,
     nullif(ecwt_discrete_c, '')::numeric,
+    nullif(diagnostic_ecwt_f, '')::numeric,
+    nullif(diagnostic_ecwt_c, '')::numeric,
+    nullif(diagnostic_ecwt_discrete_f, '')::numeric,
+    nullif(diagnostic_ecwt_discrete_c, '')::numeric,
+    nullif(hours_short_of_publish_floor, '')::bigint,
+    nullif(towers_tried_count, '')::integer,
+    nullif(towers_tried_json, '')::jsonb,
     nullif(discrete_rank, '')::integer,
     tail_hour_count::bigint,
     confidence_tier,
@@ -1122,10 +1409,18 @@ on conflict (adr0004_result_id) do update set
     missing_hour_count = excluded.missing_hour_count,
     missing_frac = excluded.missing_frac,
     coverage_ratio = excluded.coverage_ratio,
+    publishable = excluded.publishable,
     ecwt_f = excluded.ecwt_f,
     ecwt_c = excluded.ecwt_c,
     ecwt_discrete_f = excluded.ecwt_discrete_f,
     ecwt_discrete_c = excluded.ecwt_discrete_c,
+    diagnostic_ecwt_f = excluded.diagnostic_ecwt_f,
+    diagnostic_ecwt_c = excluded.diagnostic_ecwt_c,
+    diagnostic_ecwt_discrete_f = excluded.diagnostic_ecwt_discrete_f,
+    diagnostic_ecwt_discrete_c = excluded.diagnostic_ecwt_discrete_c,
+    hours_short_of_publish_floor = excluded.hours_short_of_publish_floor,
+    towers_tried_count = excluded.towers_tried_count,
+    towers_tried = excluded.towers_tried,
     discrete_rank = excluded.discrete_rank,
     tail_hour_count = excluded.tail_hour_count,
     confidence_tier = excluded.confidence_tier,
@@ -1187,6 +1482,9 @@ from (
         ('release_id', {sql_literal(release_id)}),
         ('result_rows', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)})),
         ('rows_with_ecwt', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and ecwt_f is not null)),
+        ('rows_with_diagnostic_ecwt', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and diagnostic_ecwt_f is not null)),
+        ('published_below_floor', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and ecwt_f is not null and coverage_ratio < {MIN_PUBLISH_COVERAGE})),
+        ('held_rows_with_public_ecwt', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and confidence_tier in ('provisional_review', 'blocked_no_data') and ecwt_f is not null)),
         ('cold_tail_rows', (select count(*)::text from calc.plant_ecwt_adr0004_cold_tail_hour where adr0004_run_id = {sql_literal(run_id)})),
         ('complete', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and confidence_tier = 'complete')),
         ('adequate', (select count(*)::text from calc.plant_ecwt_adr0004_result where adr0004_run_id = {sql_literal(run_id)} and confidence_tier = 'adequate')),
@@ -1200,11 +1498,11 @@ insert into audit.release_manifest (
 ) values (
     {sql_literal(release_id)},
     {sql_literal(run_id)},
-    'ADR-0004 scoped plant ECWT release',
+    'ADR-0005 scoped plant ECWT release',
     now(),
     {sql_literal(code_commit)},
     {sql_literal(release_sha)},
-    'ADR-0004 observational ECWT release with confidence tiers and cold-tail provenance.'
+    'ADR-0005 observational ECWT release with 95% public publication floor and cold-tail provenance.'
 ) on conflict (release_id) do update set
     calculation_run_id = excluded.calculation_run_id,
     release_name = excluded.release_name,
@@ -1268,14 +1566,42 @@ def db_sanity_counts(
         select
             count(*)::bigint as result_rows,
             count(*) filter (where ecwt_f is not null)::bigint as rows_with_ecwt,
-            count(*) filter (where ecwt_f is null and confidence_tier <> 'blocked_no_data')::bigint as unexpected_null_ecwt,
+            count(*) filter (where diagnostic_ecwt_f is not null)::bigint as rows_with_diagnostic_ecwt,
+            count(*) filter (where confidence_tier = 'provisional_review' and ecwt_f is null)::bigint as held_rows_with_null_public_ecwt,
+            count(*) filter (where ecwt_f is not null and coverage_ratio < {MIN_PUBLISH_COVERAGE})::bigint as published_below_floor,
+            count(*) filter (where confidence_tier in ('provisional_review', 'blocked_no_data') and ecwt_f is not null)::bigint as held_rows_with_public_ecwt,
             (select count(*) from calc.plant_ecwt_adr0004_cold_tail_hour where adr0004_run_id = {sql_literal(run_id)})::bigint as cold_tail_rows,
             (select count(distinct plant_id) from calc.plant_ecwt_adr0004_cold_tail_hour where adr0004_run_id = {sql_literal(run_id)})::bigint as plants_with_cold_tail
         from calc.plant_ecwt_adr0004_result
         where adr0004_run_id = {sql_literal(run_id)}
         """,
     )[0]
-    return OrderedDict([("tiers", tier_rows), ("sanity", scalar_rows)])
+    coverage_rows = psql_csv_query(
+        psql,
+        host,
+        port,
+        dbname,
+        user,
+        f"""
+        select
+            case
+                when coverage_ratio >= 0.99 then '>=99%'
+                when coverage_ratio >= 0.95 then '95-99%'
+                when coverage_ratio >= 0.80 then '80-95%'
+                when coverage_ratio >= 0.50 then '50-80%'
+                when coverage_ratio > 0 then '0-50%'
+                else '0%'
+            end as coverage_band,
+            count(*)::bigint as rows
+        from calc.plant_ecwt_adr0004_result
+        where adr0004_run_id = {sql_literal(run_id)}
+        group by 1
+        order by min(coverage_ratio)
+        """,
+    )
+    if int(scalar_rows["published_below_floor"]) or int(scalar_rows["held_rows_with_public_ecwt"]):
+        raise RuntimeError(f"ADR-0005 DB sanity failed: {scalar_rows}")
+    return OrderedDict([("tiers", tier_rows), ("coverage", coverage_rows), ("sanity", scalar_rows)])
 
 
 def render_status_doc(
@@ -1286,28 +1612,34 @@ def render_status_doc(
     code_commit: str,
 ) -> None:
     tiers = {row["confidence_tier"]: row["rows"] for row in db_counts["tiers"]}
+    coverage = {row["coverage_band"]: row["rows"] for row in db_counts["coverage"]}
     sanity = db_counts["sanity"]
     lines = [
-        "# ADR-0004 ECWT Status",
+        "# ADR-0005 ECWT Status",
         "",
-        f"- ADR-0004 run ID: `{outputs['run_id']}`",
+        f"- ADR-0005 run ID: `{outputs['run_id']}`",
         f"- Release ID: `{outputs['release_id']}`",
         f"- Station candidate run ID: `{outputs['station_candidate_run_id']}`",
         f"- Calculation date: `{outputs['calculation_date']}`",
         f"- Expected DJF hours: `{outputs['expected_djf_hours']}`",
+        f"- Publish floor: `{MIN_PUBLISH_COVERAGE:.0%}` (`{outputs['publish_floor_hours']}` populated winter hours)",
         f"- Git commit: `{code_commit}`",
         f"- Release CSV: `{outputs['release_csv']}`",
         f"- Release CSV SHA-256: `{release_sha}`",
+        f"- Published checksum file: `data/processed/adr0004_release_20260626T235840Z_SHA256SUMS.txt`",
         "",
         "## Counts",
         "",
         "| Metric | Count |",
         "| --- | ---: |",
         f"| Result rows | {sanity['result_rows']} |",
-        f"| Rows with ECWT | {sanity['rows_with_ecwt']} |",
+        f"| Rows with public ECWT | {sanity['rows_with_ecwt']} |",
+        f"| Rows with diagnostic ECWT | {sanity['rows_with_diagnostic_ecwt']} |",
+        f"| Held rows with null public ECWT | {sanity['held_rows_with_null_public_ecwt']} |",
+        f"| Public ECWT below 95% coverage | {sanity['published_below_floor']} |",
+        f"| Held rows with public ECWT | {sanity['held_rows_with_public_ecwt']} |",
         f"| Cold-tail rows | {sanity['cold_tail_rows']} |",
         f"| Plants with cold-tail rows | {sanity['plants_with_cold_tail']} |",
-        f"| Unexpected null ECWT rows | {sanity['unexpected_null_ecwt']} |",
         "",
         "## Confidence Split",
         "",
@@ -1318,12 +1650,25 @@ def render_status_doc(
         f"| `provisional_review` | {tiers.get('provisional_review', '0')} |",
         f"| `blocked_no_data` | {tiers.get('blocked_no_data', '0')} |",
         "",
+        "## Coverage Distribution",
+        "",
+        "| Coverage band | Plants |",
+        "| --- | ---: |",
+        f"| `>=99%` | {coverage.get('>=99%', '0')} |",
+        f"| `95-99%` | {coverage.get('95-99%', '0')} |",
+        f"| `80-95%` | {coverage.get('80-95%', '0')} |",
+        f"| `50-80%` | {coverage.get('50-80%', '0')} |",
+        f"| `0-50%` | {coverage.get('0-50%', '0')} |",
+        f"| `0%` | {coverage.get('0%', '0')} |",
+        "",
         "## Notes",
         "",
         "- ECWT math was calculated through `scripts/ecwt_core.py`; the script does not reimplement percentile or adequacy math.",
+        "- `ecwt_f` is the public value and is null unless `assess_adequacy(...).publishable` is true. Held rows retain `diagnostic_ecwt_f`, coverage, shortfall, and towers tried.",
         "- The release is analytical and is not a Generator Owner compliance filing.",
         "- Existing `weather.hourly_djf.obs_timestamp` is backfilled to the canonical hour where the prior loader did not retain the raw NOAA `DATE` timestamp. Future loads should populate the raw observation timestamp directly.",
         "- Full composite hours are exposed by `calc.plant_ecwt_adr0004_composite_hour`; materialized audit rows are limited to cold-tail hours to avoid duplicating the primary-station series hundreds of millions of times.",
+        "- Known tiny-sample ECWT anomalies are documented in `docs/findings/adr0004_tiny_sample_ecwt_anomalies.md`; the one-hour 88 F cases are held with null public `ecwt_f` under ADR-0005.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -1339,18 +1684,19 @@ def main() -> int:
     parser.add_argument("--user", default=None)
     parser.add_argument("--station-candidate-run-id")
     parser.add_argument("--calc-date")
-    parser.add_argument("--run-id")
-    parser.add_argument("--release-id")
+    parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
+    parser.add_argument("--release-id", default=DEFAULT_RELEASE_ID)
     parser.add_argument("--include-ak", action="store_true")
     parser.add_argument("--limit-plants", type=int)
+    parser.add_argument("--station-cache-size", type=int, default=384)
+    parser.add_argument("--station-batch-size", type=int, default=16)
     parser.add_argument("--skip-hourly-provenance-backfill", action="store_true")
     parser.add_argument("--skip-db-load", action="store_true")
     args = parser.parse_args()
 
     started_at = utc_now()
-    timestamp = started_at.strftime("%Y%m%dT%H%M%SZ")
-    run_id = args.run_id or f"plant_ecwt_adr0004_{timestamp}"
-    release_id = args.release_id or f"scoped_plant_ecwt_adr0004_release_{timestamp}"
+    run_id = args.run_id
+    release_id = args.release_id
     station_candidate_run_id = args.station_candidate_run_id or latest_successful_run_id(
         args.psql, args.host, args.port, args.dbname, args.user, DEFAULT_CANDIDATE_PREFIX
     )
@@ -1377,6 +1723,8 @@ def main() -> int:
         calc_date,
         args.include_ak,
         args.limit_plants,
+        args.station_cache_size,
+        args.station_batch_size,
     )
 
     if not args.skip_db_load:

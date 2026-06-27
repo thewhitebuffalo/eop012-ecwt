@@ -2,17 +2,18 @@
 
 This repository tracks a reproducible **dashboard builder**, not the rendered
 dashboard. The builder turns a published scoped plant ECWT release CSV,
-including the ADR-0004 release shape, into a single, self-contained, offline
+including the ADR-0005 release shape, into a single, self-contained, offline
 HTML dashboard.
 
 ## What it produces
 
 One HTML file with four linked views:
 
-- **U.S. map** — every plant plotted at its coordinates, colored by ECWT, with
-  three modes (ECWT temperature, highlight `ECWT < 32 F`, station distance) and
-  hover tooltips (plant, state, ECWT, primary-station distance).
-- **Distribution histogram** — 3 F bins with the 32 F EOP-012 applicability line.
+- **U.S. map** — every plant with a public ECWT plotted at its coordinates,
+  colored by ECWT, with three modes (ECWT temperature, highlight `ECWT < 32 F`,
+  station distance) and hover tooltips (plant, state, ECWT, primary-station distance).
+- **Distribution histogram** — 3 F bins of public ECWT values with the 32 F
+  EOP-012 applicability line.
 - **State ranking** — sortable by mean ECWT, coldest plant, `% < 32 F`, or count.
 - **Confidence and provenance** — ADR-0004 confidence-tier split plus
   source-channel contributions across plant composites.
@@ -31,6 +32,8 @@ containing at least:
 - optional: `primary_station_distance_km` (drives the data-quality panel)
 - optional ADR-0004 fields: `confidence_tier`, `needs_review`, `reason`,
   `source_channels`, `coverage_basis`, `publication_caveat`
+- optional ADR-0005 fields: `diagnostic_ecwt_f`, `publishable`,
+  `hours_short_of_publish_floor`
 
 ## Build
 
@@ -62,8 +65,8 @@ the release CSV and checksum manifest, or additionally publish it as:
 ## Caveat
 
 The dashboard reflects whatever release CSV it is given. The generated page
-surfaces source release, confidence tiers, review reasons, source-channel
+surfaces source release, confidence tiers, held-row counts, review reasons, source-channel
 contributions, and station-distance buckets so diagnostic releases and
-ADR-0004 analytical releases do not get visually conflated. Regenerate it after
+ADR-0005 analytical releases do not get visually conflated. Regenerate it after
 any release that changes the adequacy or representativeness treatment
 (see `docs/adr/`).
