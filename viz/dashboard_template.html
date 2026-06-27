@@ -46,6 +46,24 @@
   .foot{color:var(--muted);font-size:11.5px;margin-top:18px;line-height:1.6}
   .foot code{background:#eef1f5;padding:1px 5px;border-radius:4px}
   .mapnote{font-size:11px;color:var(--muted);margin-top:6px}
+  #map{cursor:pointer}
+  .detail{position:fixed;top:0;right:0;width:360px;max-width:92vw;height:100vh;overflow:auto;
+    background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(0,0,0,.12);
+    padding:16px 18px;z-index:20;transform:translateX(100%);transition:transform .18s}
+  .detail.show{transform:none}
+  .detail .close{position:absolute;top:8px;right:12px;border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--muted)}
+  .detail h3{margin:0 0 2px;font-size:16px;padding-right:26px}
+  .detail .meta{color:var(--muted);font-size:12px;margin-bottom:10px}
+  .detail .ecwt{font-size:30px;font-weight:680;letter-spacing:-.02em}
+  .detail .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;color:#fff;vertical-align:middle;margin-left:6px}
+  .detail section{margin-top:14px}
+  .detail section h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .detail table{width:100%;border-collapse:collapse;font-size:12px}
+  .detail td{padding:2px 0;vertical-align:top}
+  .detail td.k{color:var(--muted);padding-right:10px;white-space:nowrap}
+  .detail .twr{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0;border-bottom:1px solid #f0f2f6}
+  .detail .twr .id{font-family:ui-monospace,Consolas,monospace;font-size:11px}
+  .detail .note{font-size:11px;color:var(--muted);margin-top:5px}
 </style>
 </head>
 <body>
@@ -62,7 +80,7 @@
   <div class="grid">
     <div class="card full">
       <h2>Where the cold is — ECWT by plant location (CONUS)</h2>
-      <div class="h-sub">Each point is a generating plant, colored by its ECWT. Hover for details.</div>
+      <div class="h-sub">Each point is a generating plant, colored by its ECWT. Hover for a quick read; click a plant for full details.</div>
       <div class="controls" id="mapctl">
         <button data-mode="temp" class="on">Color: ECWT (&deg;F)</button>
         <button data-mode="below">Highlight ECWT &lt; 32&deg;F</button>
@@ -110,6 +128,7 @@
     This dashboard is analytical and is not a compliance filing. It is a self-contained local file; it embeds its data and uses no internet connection.
   </div>
 </div>
+<aside class="detail" id="detail"></aside>
 <div class="tip" id="tip"></div>
 
 <script>
@@ -191,6 +210,7 @@
   var aspect=((LON1-LON0)*Math.cos(37*Math.PI/180))/(LAT1-LAT0);
   var cv=document.getElementById("map"), ctx=cv.getContext("2d");
   var mode="temp";
+  var selected=null;
   var pts=D.points;
   var offExtent = pts.filter(function(p){return p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1;}).length;
   document.getElementById("mapnote").textContent = offExtent
@@ -220,6 +240,12 @@
       }
       ctx.globalAlpha=a; ctx.fillStyle=col;
       ctx.beginPath(); ctx.arc(xy[0],xy[1],r,0,6.2832); ctx.fill();
+    }
+    if(selected && !(selected.lo<LON0||selected.lo>LON1||selected.la<LAT0||selected.la>LAT1)){
+      var sxy=project(selected,w,h);
+      ctx.globalAlpha=1;
+      ctx.beginPath(); ctx.arc(sxy[0],sxy[1],6.5,0,6.2832); ctx.lineWidth=3; ctx.strokeStyle="#fff"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(sxy[0],sxy[1],6.5,0,6.2832); ctx.lineWidth=1.6; ctx.strokeStyle="#11161f"; ctx.stroke();
     }
     ctx.globalAlpha=1;
     cv._w=w; cv._h=h;
@@ -262,6 +288,55 @@
     } else tip.style.opacity=0;
   });
   cv.addEventListener("mouseleave",function(){tip.style.opacity=0;});
+
+  // ---------- CLICK -> DETAIL DRAWER ----------
+  var detail=document.getElementById("detail");
+  var tierColor={complete:"#1a9850",adequate:"#74add1",provisional_review:"#fdae61",blocked_no_data:"#b4232a"};
+  function esc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+  function closeDetail(){detail.classList.remove("show");selected=null;drawMap();}
+  function openDetail(p){
+    selected=p;
+    var tier=p.t||"";
+    var stat=[];
+    stat.push(["Coverage", p.cov!=null?p.cov.toFixed(1)+"%":"&mdash;"]);
+    stat.push(["Valid hours",(p.vh!=null?p.vh.toLocaleString():"&mdash;")+(p.eh!=null?" / "+p.eh.toLocaleString()+" expected":"")]);
+    if(p.fh) stat.push(["Filled from other towers",p.fh.toLocaleString()+" hrs"]);
+    if(p.dr!=null) stat.push(["Discrete-rank ECWT",fmt(p.dr)+"&deg;F"]);
+    if(p.nr) stat.push(["Flag","needs review"]);
+    var statHtml=stat.map(function(kv){return '<tr><td class="k">'+kv[0]+'</td><td>'+kv[1]+'</td></tr>';}).join("");
+    var ctw=p.ctw||[], more=(p.ctwN||ctw.length)-ctw.length;
+    var ctwHtml=ctw.map(function(t){var pct=p.vh?Math.round(100*t[1]/p.vh):0;
+      return '<div class="twr"><span class="id">'+esc(t[0])+'</span><span>'+t[1].toLocaleString()+' hrs &middot; '+pct+'%</span></div>';}).join("")||'<div class="note">none recorded</div>';
+    if(more>0) ctwHtml+='<div class="note">+ '+more+' more tower'+(more>1?"s":"")+'</div>';
+    var ctp=p.ctp||[];
+    var ctpHtml=ctp.map(function(t){var parts=String(t[0]).split("|");
+      return '<div class="twr"><span class="id">'+esc(parts[0])+'</span><span>'+(parts[1]?esc(parts[1].replace(/_/g," "))+" &middot; ":"")+t[1]+' hrs</span></div>';}).join("")||'<div class="note">none recorded</div>';
+    detail.innerHTML=
+      '<button class="close" id="detailClose" aria-label="Close">&times;</button>'+
+      '<h3>'+esc(p.n||"Plant")+'<span class="badge" style="background:'+(tierColor[tier]||"#647089")+'">'+(tier?esc(tier.replace(/_/g," ")):"&mdash;")+'</span></h3>'+
+      '<div class="meta">'+esc(p.s||"")+(p.cty?' &middot; '+esc(p.cty)+' County':'')+(p.eia?' &middot; EIA '+esc(p.eia):'')+'</div>'+
+      '<div class="ecwt">'+fmt(p.e)+'&deg;F</div>'+
+      '<div class="note">ECWT = lowest 0.2 percentile of DJF hours since 2000</div>'+
+      '<section><h4>Stats</h4><table>'+statHtml+'</table></section>'+
+      '<section><h4>Primary station</h4><div class="twr"><span class="id">'+esc(p.sid||"&mdash;")+'</span><span>'+(p.d!=null?p.d+' km away':'distance n/a')+'</span></div></section>'+
+      '<section><h4>Towers that contributed hours'+(p.ttc?' ('+p.ttc+' tried)':'')+'</h4>'+ctwHtml+
+        '<div class="note">Nearest-first fill; share of this plant&rsquo;s valid hours shown. Per-tower distance isn&rsquo;t in this release (primary distance above).</div></section>'+
+      '<section><h4>Towers that set the ECWT (coldest tail)</h4>'+ctpHtml+'</section>';
+    detail.classList.add("show");
+    document.getElementById("detailClose").onclick=closeDetail;
+    drawMap();
+  }
+  cv.addEventListener("click",function(ev){
+    var rect=cv.getBoundingClientRect();
+    var mx=ev.clientX-rect.left, my=ev.clientY-rect.top, w=cv._w,h=cv._h;
+    var best=null,bd=120;
+    for(var i=0;i<pts.length;i++){var p=pts[i];
+      if(p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1)continue;
+      var xy=project(p,w,h),dx=xy[0]-mx,dy=xy[1]-my,d2=dx*dx+dy*dy;
+      if(d2<bd){bd=d2;best=p;}}
+    if(best) openDetail(best);
+  });
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeDetail();});
 
   // ---------- HISTOGRAM ----------
   (function(){
