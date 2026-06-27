@@ -13,9 +13,10 @@ Scope is set by docs/adr/0004-observational-source-hierarchy-and-adequacy.md:
 - ECWT = continuous 0.2 percentile of hourly DJF dry-bulb temperatures since
   2000-01-01, matching Excel ``PERCENTILE.INC(range, 0.002)`` and SQL
   ``percentile_cont(0.002)``.
-- "Adequacy" follows the standard's documentation-based approach (the percentile
-  is robust to missing data above the ECWT; what matters is missing data at or
-  below the cold tail) rather than a rigid coverage threshold.
+- Publication adequacy (docs/adr/0005): every expected winter hour counts equally
+  (no time-of-day weighting); an ECWT is publishable only when at least
+  MIN_PUBLISH_COVERAGE (default 0.95) of the expected DJF hours are populated.
+  Below that floor the plant is held, not published.
 - Every contributing hour carries provenance: tower/station id, timestamp, and
   source channel, so any published ECWT hour is traceable to a checksummed file.
 
@@ -32,6 +33,12 @@ from datetime import date, timedelta
 DJF_MONTHS = (12, 1, 2)
 ECWT_PERCENTILE = 0.002  # lowest 0.2 percentile
 CALC_PERIOD_START = date(2000, 1, 1)
+
+# ADR-0005 publication floor. Every expected DJF winter hour counts equally (no
+# time-of-day weighting); an ECWT is publishable only when at least this fraction
+# of the expected winter hours is populated. Below the floor the plant is held.
+COMPLETE_COVERAGE = 0.99
+MIN_PUBLISH_COVERAGE = 0.95
 
 
 # --------------------------------------------------------------------------- #
@@ -101,11 +108,12 @@ class Adequacy:
     n: int
     expected_hours: int
     missing_hours: int
-    missing_frac: float
+    coverage: float            # populated / expected, capped at 1.0
     ecwt_f: float
     ecwt_discrete_f: float
     tail_hours: int            # observed hours <= ecwt_f (the cold tail that sets ECWT)
     confidence_tier: str       # complete | adequate | provisional_review | blocked_no_data
+    publishable: bool          # True only when coverage meets the publish floor
     needs_review: bool
     reason: str
 
@@ -114,42 +122,45 @@ def assess_adequacy(
     temps,
     expected_hours: int,
     *,
-    complete_max_missing_frac: float = 0.02,
-    adequate_max_missing_frac: float = 0.15,
+    min_publish_coverage: float = MIN_PUBLISH_COVERAGE,
+    complete_coverage: float = COMPLETE_COVERAGE,
 ) -> Adequacy:
-    """Assess data sufficiency and assign a confidence tier.
+    """Assess winter-hour coverage and decide whether the ECWT is publishable.
 
-    This is a coarse, automated proxy aligned with the standard's principle that
-    the percentile is robust to missing data *above* the ECWT; the authoritative
-    test is whether missing hours fall *at or below* the cold tail, which
-    requires the actual missing timestamps and is refined downstream against the
-    gap calendar. Thresholds are documented policy defaults, not a hard gate:
-    every plant with any valid data still receives an ECWT value plus a tier and
-    a documented reason. Only zero-data is blocked.
+    Per docs/adr/0005: the goal for every plant is to populate ALL expected winter
+    (DJF) hours since 2000 -- every hour, with no time-of-day weighting. An ECWT is
+    publishable only when coverage (populated / expected) meets the publish floor
+    (default 0.95). Below the floor the plant is HELD: the diagnostic value is
+    still returned, but ``publishable`` is False and it must NOT be written to the
+    public ECWT field. Zero data is blocked. This replaces ADR-0004's permissive
+    "every plant with any valid data receives an ECWT value".
     """
     xs = [t for t in temps if t is not None]
     n = len(xs)
+    if expected_hours <= 0:
+        raise ValueError("assess_adequacy: expected_hours must be positive")
     if n == 0:
-        return Adequacy(0, expected_hours, expected_hours, 1.0,
+        return Adequacy(0, expected_hours, expected_hours, 0.0,
                         float("nan"), float("nan"), 0,
-                        "blocked_no_data", True, "no valid DJF hours")
+                        "blocked_no_data", False, True, "no valid DJF hours")
     ecwt = ecwt_percentile(xs)
     disc = ecwt_discrete_rank_temp(xs)
     missing = max(0, expected_hours - n)
-    frac = (missing / expected_hours) if expected_hours else 0.0
+    coverage = min(1.0, n / expected_hours)
     tail = sum(1 for t in xs if t <= ecwt)
-    if frac <= complete_max_missing_frac:
-        tier, review, reason = "complete", False, "near-complete observed coverage"
-    elif frac <= adequate_max_missing_frac:
-        tier, review, reason = ("adequate", False,
-                                "missing hours present; cold tail populated, "
-                                "missing fraction within adequate band")
+    if coverage >= complete_coverage:
+        tier, publishable, reason = ("complete", True,
+                                     "winter hours essentially fully populated")
+    elif coverage >= min_publish_coverage:
+        tier, publishable, reason = ("adequate", True,
+                                     "winter hours populated at or above the publish floor")
     else:
-        tier, review, reason = ("provisional_review", True,
-                                "missing fraction high enough that missing hours "
-                                "could fall at/below ECWT; confirm against gap calendar")
-    return Adequacy(n, expected_hours, missing, round(frac, 4),
-                    round(ecwt, 1), round(disc, 1), tail, tier, review, reason)
+        tier, publishable, reason = ("provisional_review", False,
+                                     f"only {coverage:.1%} of expected winter hours populated; "
+                                     f"below the {min_publish_coverage:.0%} publish floor -- held, not published")
+    return Adequacy(n, expected_hours, missing, round(coverage, 4),
+                    round(ecwt, 1), round(disc, 1), tail, tier, publishable,
+                    not publishable, reason)
 
 
 # --------------------------------------------------------------------------- #
