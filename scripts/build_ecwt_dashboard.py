@@ -34,14 +34,15 @@ import base64
 import csv
 import json
 import math
+import mimetypes
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TEMPLATE = REPO_ROOT / "viz" / "dashboard_template.html"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "EOP012_ECWT_dashboard.html"
-DEFAULT_VENMO_QR = REPO_ROOT / "viz" / "assets" / "venmo_donation_qr.jpg"
+DEFAULT_SUPPORT_QR = REPO_ROOT / "viz" / "assets" / "buymeacoffee_qr.png"
 PLACEHOLDER = "__ECWT_DATA__"
-VENMO_QR_PLACEHOLDER = "__VENMO_QR_DATA_URI__"
+SUPPORT_QR_PLACEHOLDER = "__SUPPORT_QR_DATA_URI__"
 
 LOWER_48_STATES = {
     "AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL",
@@ -346,8 +347,8 @@ def main() -> int:
                     help="Wide scoped_plant_ecwt_release_*.csv (with lat/lon/distance).")
     ap.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE)
     ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    ap.add_argument("--venmo-qr", type=Path, default=DEFAULT_VENMO_QR,
-                    help="QR image embedded in the dashboard donation prompt.")
+    ap.add_argument("--support-qr", type=Path, default=DEFAULT_SUPPORT_QR,
+                    help="QR image embedded in the dashboard support prompt.")
     args = ap.parse_args()
 
     if not args.release_csv.exists():
@@ -361,11 +362,12 @@ def main() -> int:
         raise SystemExit(f"template missing {PLACEHOLDER} placeholder")
     data_js = "window.ECWT = " + json.dumps(payload, separators=(",", ":")) + ";"
     html = template.replace(PLACEHOLDER, data_js)
-    if VENMO_QR_PLACEHOLDER in html:
-        if not args.venmo_qr.exists():
-            raise SystemExit(f"Venmo QR asset not found: {args.venmo_qr}")
-        qr_data = base64.b64encode(args.venmo_qr.read_bytes()).decode("ascii")
-        html = html.replace(VENMO_QR_PLACEHOLDER, "data:image/jpeg;base64," + qr_data)
+    if SUPPORT_QR_PLACEHOLDER in html:
+        if not args.support_qr.exists():
+            raise SystemExit(f"Support QR asset not found: {args.support_qr}")
+        mime_type = mimetypes.guess_type(args.support_qr.name)[0] or "image/png"
+        qr_data = base64.b64encode(args.support_qr.read_bytes()).decode("ascii")
+        html = html.replace(SUPPORT_QR_PLACEHOLDER, f"data:{mime_type};base64,{qr_data}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(html, encoding="utf-8")
