@@ -16,8 +16,8 @@
   .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 60px}
   header h1{margin:0 0 2px;font-size:22px;letter-spacing:0}
   header .sub{color:var(--muted);font-size:13px}
-  .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid #d6a400;
-          background:#fff8e6;border-radius:6px;font-size:12.5px;color:#6b5400}
+  .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid var(--accent);
+          background:#eef6ff;border-radius:6px;font-size:12.5px;color:#24405f}
   .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px}
   @media(max-width:920px){.kpis{grid-template-columns:repeat(4,1fr)}}
   @media(max-width:520px){.kpis{grid-template-columns:repeat(2,1fr)}}
@@ -146,13 +146,11 @@
   var blocked = tiers.blocked_no_data || 0;
   var tierReady = complete + adequate;
   document.getElementById("sourceSub").innerHTML =
-    'Source: <code style="font-size:11px">'+releaseId+'</code>'+(runId?' · Run: <code style="font-size:11px">'+runId+'</code>':'')+' · '+
-    D.kpis.plants.toLocaleString()+' policy rows · '+D.kpis.plotted.toLocaleString()+
-    ' plotted rows with coordinates and public ECWT · coverage basis: '+(q.coverageBasis || 'fixed-period DJF since 2000');
+    'This dashboard maps plant-level Extreme Cold Weather Temperature estimates across the fleet and shows where the coldest design conditions are concentrated. Click any plant to inspect the weather-station composite, coverage, contributing towers, and cold-tail provenance behind its value.';
   var far100 = q.far100 || 0;
   var farPct = q.far100pct == null ? 0 : q.far100pct;
   document.getElementById("qualityBanner").innerHTML =
-    '<b>ADR-0005 analytical release.</b> Public ECWT is written only for complete/adequate rows at or above the 95% winter-hour coverage floor. Provisional rows are held with null public ECWT and retained diagnostic values. '+(q.publicationCaveat || 'Analytical output; not a compliance filing.');
+    'Public ECWT values are shown only when the assembled winter-hour record meets the ADR-0005 coverage floor; rows that fall short are kept for review with diagnostic values, but their public ECWT is held blank.';
   document.getElementById("distSub").innerHTML = q.knownDistance
     ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
