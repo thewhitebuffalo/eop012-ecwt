@@ -19,6 +19,7 @@
   header .sub{color:var(--muted);font-size:13px}
   .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid var(--accent);
           background:#eef6ff;border-radius:6px;font-size:12.5px;color:#24405f}
+  .map-banner{margin:10px 0 0}
   .support{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px;
     padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px}
   .support .title{font-size:14px;font-weight:650;margin-bottom:2px}
@@ -108,9 +109,6 @@
     <h1>Extreme Cold Weather Temperature Dashboard</h1>
     <div class="sub" id="sourceSub"></div>
   </header>
-
-  <div class="banner" id="qualityBanner"></div>
-
   <section class="support" aria-label="Support the ECWT project">
     <div>
       <div class="title">Was the worksheet worth it?</div>
@@ -146,6 +144,7 @@
         <span id="legL">colder</span><div class="bar" id="legbar"></div><span id="legR">warmer</span>
       </div>
       <div class="mapnote" id="mapnote"></div>
+      <div class="banner map-banner" id="qualityBanner"></div>
     </div>
 
     <div class="card">
