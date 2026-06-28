@@ -40,6 +40,17 @@ DEFAULT_TEMPLATE = REPO_ROOT / "viz" / "dashboard_template.html"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "EOP012_ECWT_dashboard.html"
 PLACEHOLDER = "__ECWT_DATA__"
 
+# Public project names do not always match EIA plant names. Keep this list small
+# and explicit so dashboard search can bridge known umbrella/project aliases.
+PLANT_ALIASES = {
+    "63981": ["Western Spirit Wind", "Western Spirit"],
+    "64054": ["Western Spirit Wind", "Western Spirit"],
+    "64065": ["Western Spirit Wind", "Western Spirit"],
+    "64066": ["Western Spirit Wind", "Western Spirit"],
+    "66923": ["Sun Zia"],
+    "66924": ["Sun Zia"],
+}
+
 
 def _f(value):
     if value is None:
@@ -187,6 +198,7 @@ def build_payload(release_csv: Path) -> dict:
                 dr = _f(row.get("ecwt_discrete_f"))
                 ctw_top, ctw_n = _top_pairs(row.get("contributing_towers"), 6)
                 ctp_top, _ = _top_pairs(row.get("cold_tail_provenance"), 8)
+                eia_code = (row.get("eia_plant_code") or "").strip()
                 points.append({
                     "la": round(la, 3),
                     "lo": round(lo, 3),
@@ -207,7 +219,8 @@ def build_payload(release_csv: Path) -> dict:
                     "eh": _int(row.get("expected_hour_count")),
                     "fh": _int(row.get("filled_hour_count")),
                     "cty": (row.get("plant_county") or "").strip(),
-                    "eia": (row.get("eia_plant_code") or "").strip(),
+                    "eia": eia_code,
+                    "a": PLANT_ALIASES.get(eia_code, []),
                     "ttc": _int(row.get("towers_tried_count")),
                     "ctw": ctw_top,    # [[station_id, hours], ...] top 6 by hours
                     "ctwN": ctw_n,     # total contributing towers

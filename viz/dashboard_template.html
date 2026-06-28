@@ -362,8 +362,9 @@
     function render(){
       if(!cur.length){rez.innerHTML='<div class="empty">No plant names match.</div>';rez.classList.add("show");return;}
       rez.innerHTML=cur.map(function(p,i){
+        var alias=(p.a&&p.a.length)?' &middot; '+esc(p.a[0]):'';
         return '<div class="item" data-i="'+i+'"><span class="nm">'+esc(p.n||"(unnamed)")+
-          '</span><span class="meta">'+esc(p.s||"")+' &middot; '+fmt(p.e)+'&deg;F</span></div>';
+          '</span><span class="meta">'+esc(p.s||"")+' &middot; '+fmt(p.e)+'&deg;F'+alias+'</span></div>';
       }).join("");
       rez.classList.add("show");
     }
@@ -379,7 +380,8 @@
       if(q.length<2){cur=[];rez.classList.remove("show");return;}
       var out=[];
       for(var i=0;i<pts.length && out.length<25;i++){
-        if((pts[i].n||"").toLowerCase().indexOf(q)>-1) out.push(pts[i]);
+        var p=pts[i], hay=((p.n||"")+' '+((p.a||[]).join(" "))).toLowerCase();
+        if(hay.indexOf(q)>-1) out.push(p);
       }
       cur=out; render();
     }
