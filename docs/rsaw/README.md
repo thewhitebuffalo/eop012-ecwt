@@ -21,8 +21,8 @@ this copy is a point-in-time snapshot.
 
 The detail drawer's **Generate RSAW R1 worksheet** button (see
 [`viz/dashboard_template.html`](../../viz/dashboard_template.html), function
-`buildRSAW`) produces a self-contained, print-ready worksheet that pre-fills the
-**R1 Registered Entity Response** for a single generating unit. It covers
+`buildRSAWDocx`) produces a self-contained, editable Word `.docx` worksheet that
+pre-fills the **R1 Registered Entity Response** for a single generating unit. It covers
 **Requirement R1 only** — the ECWT calculation. R2–R9 (freeze-protection
 measures, Corrective Action Plans, declarations, generating-unit minimums, etc.)
 require entity documentation that is outside this dataset.
@@ -47,5 +47,6 @@ filing. Values should be reviewed by the registered entity before submission.
 ## Regenerating
 
 The worksheet is built entirely in the browser from the data already embedded in
-the dashboard HTML — no server, no external requests. To rebuild the dashboard
-after editing the template, see [`docs/REPRODUCING.md`](../REPRODUCING.md).
+the dashboard HTML. The browser creates the WordprocessingML `.docx` package
+locally — no server, no external requests. To rebuild the dashboard after
+editing the template, see [`docs/REPRODUCING.md`](../REPRODUCING.md).
