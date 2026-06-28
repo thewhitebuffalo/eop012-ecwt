@@ -9,6 +9,17 @@ Goal: calculate a documented Extreme Cold Weather Temperature (ECWT) for U.S. ge
 3. Keep raw source files immutable.
 4. Store all source provenance, station-selection decisions, coverage checks, and calculation outputs explicitly.
 
+## Release outputs
+
+The per-run ECWT outputs are large (the full results, scoped release, per-hour cold-tail provenance, and source tables total roughly 500 MB) and regenerate on every run, so they are **published as GitHub Release assets rather than committed to Git history.** This keeps clones fast while keeping every published value auditable and downloadable.
+
+- **Audit or verify a published value:** download the scoped release CSV (`scoped_plant_ecwt_*_release_*.csv`) from the matching [Release](https://github.com/thewhitebuffalo/eop012-ecwt/releases). Each row carries the plant's ECWT plus its station provenance and coverage.
+- **Verify integrity:** the small `*_SHA256SUMS.txt` manifest is kept in the repo under `data/processed/` so any downloaded Release asset can be checksummed against what was published.
+- **Reproduce:** regenerate the outputs with the pipeline, then build the dashboard with `scripts/build_ecwt_dashboard.py --release-csv <scoped CSV>`.
+- The self-contained dashboard (`build/EOP012_ADR0004_ECWT_dashboard.html`) embeds the published results and stays in the repo as the viewable artifact.
+
+Output CSVs under `data/processed/` are git-ignored (see `.gitignore`); attach them to the tagged Release for each run instead of committing them.
+
 ## Local Configuration
 
 Scripts can run from any clone path. Defaults come from environment variables in
