@@ -30,6 +30,7 @@ and optionally:
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import math
@@ -38,7 +39,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TEMPLATE = REPO_ROOT / "viz" / "dashboard_template.html"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "EOP012_ECWT_dashboard.html"
+DEFAULT_VENMO_QR = REPO_ROOT / "viz" / "assets" / "venmo_donation_qr.jpg"
 PLACEHOLDER = "__ECWT_DATA__"
+VENMO_QR_PLACEHOLDER = "__VENMO_QR_DATA_URI__"
+
+LOWER_48_STATES = {
+    "AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL",
+    "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT",
+    "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA",
+    "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY",
+}
 
 # Public project names do not always match EIA plant names. Keep this list small
 # and explicit so dashboard search can bridge known umbrella/project aliases.
@@ -243,7 +253,7 @@ def build_payload(release_csv: Path) -> dict:
         "rowsWithDiagnosticEcwt": rows_with_diagnostic_ecwt,
         "rowsMissingEcwt": total_rows - rows_with_ecwt,
         "heldRows": held_rows,
-        "states": len(by_state),
+        "states": len(LOWER_48_STATES.intersection(by_state)),
         "minF": round(min(vals), 1),
         "maxF": round(max(vals), 1),
         "meanF": round(sum(vals) / n, 1),
@@ -282,6 +292,8 @@ def build_payload(release_csv: Path) -> dict:
 
     state_rows = []
     for s, g in by_state.items():
+        if s not in LOWER_48_STATES:
+            continue
         b = sum(1 for v in g if v < 32)
         state_rows.append({
             "s": s,
@@ -334,6 +346,8 @@ def main() -> int:
                     help="Wide scoped_plant_ecwt_release_*.csv (with lat/lon/distance).")
     ap.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE)
     ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    ap.add_argument("--venmo-qr", type=Path, default=DEFAULT_VENMO_QR,
+                    help="QR image embedded in the dashboard donation prompt.")
     args = ap.parse_args()
 
     if not args.release_csv.exists():
@@ -347,6 +361,11 @@ def main() -> int:
         raise SystemExit(f"template missing {PLACEHOLDER} placeholder")
     data_js = "window.ECWT = " + json.dumps(payload, separators=(",", ":")) + ";"
     html = template.replace(PLACEHOLDER, data_js)
+    if VENMO_QR_PLACEHOLDER in html:
+        if not args.venmo_qr.exists():
+            raise SystemExit(f"Venmo QR asset not found: {args.venmo_qr}")
+        qr_data = base64.b64encode(args.venmo_qr.read_bytes()).decode("ascii")
+        html = html.replace(VENMO_QR_PLACEHOLDER, "data:image/jpeg;base64," + qr_data)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(html, encoding="utf-8")
