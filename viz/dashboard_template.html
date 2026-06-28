@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EOP-012 ECWT Dashboard</title>
+<link rel="icon" href="data:,">
 <script>__ECWT_DATA__</script>
 <style>
   :root{
@@ -18,6 +19,19 @@
   header .sub{color:var(--muted);font-size:13px}
   .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid var(--accent);
           background:#eef6ff;border-radius:6px;font-size:12.5px;color:#24405f}
+  .support{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px;
+    padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px}
+  .support .title{font-size:14px;font-weight:650;margin-bottom:2px}
+  .support .copy{color:var(--muted);font-size:12.5px;max-width:760px}
+  .support .qr{display:flex;align-items:center;gap:10px;min-width:250px;justify-content:flex-end}
+  .support img{width:128px;height:128px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff}
+  .support .amt{font-size:13px;font-weight:650;white-space:nowrap}
+  .support .scan{font-size:11.5px;color:var(--muted);white-space:nowrap}
+  @media(max-width:680px){
+    .support{align-items:flex-start;flex-direction:column}
+    .support .qr{justify-content:flex-start;min-width:0}
+    .support img{width:132px;height:132px}
+  }
   .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px}
   @media(max-width:920px){.kpis{grid-template-columns:repeat(4,1fr)}}
   @media(max-width:520px){.kpis{grid-template-columns:repeat(2,1fr)}}
@@ -94,6 +108,20 @@
 
   <div class="banner" id="qualityBanner"></div>
 
+  <section class="support" aria-label="Support the ECWT project">
+    <div>
+      <div class="title">Support the public ECWT project</div>
+      <div class="copy">If the automated NERC RSAW Word document saved you time, consider a $25 Venmo contribution to help maintain the dashboard, source review, and worksheet generator.</div>
+    </div>
+    <div class="qr">
+      <img src="__VENMO_QR_DATA_URI__" alt="Venmo donation QR code">
+      <div>
+        <div class="amt">$25 suggested</div>
+        <div class="scan">Scan with Venmo</div>
+      </div>
+    </div>
+  </section>
+
   <div class="kpis" id="kpis"></div>
 
   <div class="grid">
@@ -123,7 +151,7 @@
     </div>
 
     <div class="card">
-      <h2>States ranked</h2>
+      <h2>Lower-48 states ranked</h2>
       <div class="controls" id="statectl">
         <button data-k="mean" class="on">Mean ECWT</button>
         <button data-k="min">Coldest plant</button>
@@ -197,7 +225,7 @@
     [blocked.toLocaleString(),"Blocked no data","flag"],
     [k.below32pct+"%","ECWT &lt; 32&deg;F among ECWT rows","flag"],
     [fmt(k.meanF)+"&deg;","Mean ECWT"],
-    [k.states,"States"]
+    [k.states,"Lower-48 states"]
   ];
   document.getElementById("kpis").innerHTML = cards.map(function(c){
     var v=String(c[0]).replace(/^v /,"");
@@ -235,7 +263,7 @@
   var pts=D.points;
   var offExtent = pts.filter(function(p){return p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1;}).length;
   document.getElementById("mapnote").textContent = offExtent
-    ? "Map shows the contiguous U.S. extent; "+offExtent.toLocaleString()+" off-extent rows are excluded from the map but included in all statistics."
+    ? "Map shows the contiguous U.S. extent; "+offExtent.toLocaleString()+" off-extent rows are excluded from the map. The state count and ranking are lower-48 only."
     : "Map shows all release rows within the contiguous U.S. extent.";
   function project(p,w,h){
     var x=(p.lo-LON0)/(LON1-LON0)*w;
