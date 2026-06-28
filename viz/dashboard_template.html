@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EOP-012 ADR-0005 ECWT Dashboard</title>
+<title>EOP-012 ECWT Dashboard</title>
 <script>__ECWT_DATA__</script>
 <style>
   :root{
@@ -84,7 +84,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>EOP-012 ADR-0005 Extreme Cold Weather Temperature Dashboard</h1>
+    <h1>Extreme Cold Weather Temperature Dashboard</h1>
     <div class="sub" id="sourceSub"></div>
   </header>
 
@@ -169,7 +169,7 @@
   var far100 = q.far100 || 0;
   var farPct = q.far100pct == null ? 0 : q.far100pct;
   document.getElementById("qualityBanner").innerHTML =
-    'Public ECWT values are shown only when the assembled winter-hour record meets the ADR-0005 coverage floor; rows that fall short are kept for review with diagnostic values, but their public ECWT is held blank.';
+    'Public ECWT values are shown only when the assembled winter-hour record meets the 95% coverage floor; rows that fall short are kept for review with diagnostic values, but their public ECWT is held blank.';
   document.getElementById("distSub").innerHTML = q.knownDistance
     ? "How far is each plant's assigned primary weather station? "+
       q.within100.toLocaleString()+' of '+q.knownDistance.toLocaleString()+
