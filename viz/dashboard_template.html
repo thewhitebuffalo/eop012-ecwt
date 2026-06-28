@@ -23,13 +23,16 @@
     padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px}
   .support .title{font-size:14px;font-weight:650;margin-bottom:2px}
   .support .copy{color:var(--muted);font-size:12.5px;max-width:760px}
-  .support .qr{display:flex;align-items:center;gap:10px;min-width:250px;justify-content:flex-end}
+  .support .qr{display:flex;align-items:center;gap:12px;min-width:360px;justify-content:flex-end}
   .support img{width:128px;height:128px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff}
   .support .amt{font-size:13px;font-weight:650;white-space:nowrap}
   .support .scan{font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .support .support-btn{display:inline-block;margin-top:8px;background:var(--accent);color:#fff;
+    text-decoration:none;font-size:12.5px;font-weight:650;padding:8px 12px;border-radius:6px}
+  .support .support-btn:hover{background:#17487f}
   @media(max-width:680px){
     .support{align-items:flex-start;flex-direction:column}
-    .support .qr{justify-content:flex-start;min-width:0}
+    .support .qr{justify-content:flex-start;min-width:0;align-items:center}
     .support img{width:132px;height:132px}
   }
   .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:18px}
@@ -111,13 +114,14 @@
   <section class="support" aria-label="Support the ECWT project">
     <div>
       <div class="title">Support the public ECWT project</div>
-      <div class="copy">If the automated NERC RSAW Word document saved you time, consider a $25 Venmo contribution to help maintain the dashboard, source review, and worksheet generator.</div>
+      <div class="copy">If the automated NERC RSAW Word document saved you time, the suggested contribution is $25 per site RSAW. Card payments are accepted through Buy Me a Coffee.</div>
+      <a class="support-btn" href="https://www.buymeacoffee.com/whitebuffalo" target="_blank" rel="noopener">Contribute $25 per site RSAW</a>
     </div>
     <div class="qr">
-      <img src="__VENMO_QR_DATA_URI__" alt="Venmo donation QR code">
+      <img src="__SUPPORT_QR_DATA_URI__" alt="Buy Me a Coffee contribution QR code">
       <div>
-        <div class="amt">$25 suggested</div>
-        <div class="scan">Scan with Venmo</div>
+        <div class="amt">$25 per site RSAW</div>
+        <div class="scan">Scan or pay by card</div>
       </div>
     </div>
   </section>
@@ -176,7 +180,7 @@
 
   <div class="foot">
     Generated locally from the public repo <code>thewhitebuffalo/eop012-ecwt</code>. ECWT is displayed to 0.1&deg;F.
-    This dashboard is analytical and is not a compliance filing. It is a self-contained local file; it embeds its data and uses no internet connection.
+    This dashboard is analytical and is not a compliance filing. It embeds its ECWT data and does not require an internet connection except when opening the external support link.
   </div>
 </div>
 <aside class="detail" id="detail"></aside>
