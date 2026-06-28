@@ -79,6 +79,10 @@
   .detail .twr{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0;border-bottom:1px solid #f0f2f6}
   .detail .twr .id{font-family:ui-monospace,Consolas,monospace;font-size:11px}
   .detail .note{font-size:11px;color:var(--muted);margin-top:5px}
+  .detail .rsaw-btn{display:block;width:100%;font:inherit;font-size:12.5px;font-weight:560;cursor:pointer;
+    background:var(--accent);color:#fff;border:none;border-radius:6px;padding:9px 12px;margin-top:2px}
+  .detail .rsaw-btn:hover{background:#17487f}
+  .detail .rsaw-btn:disabled{background:#aeb6c3;cursor:default}
 </style>
 </head>
 <body>
@@ -338,9 +342,16 @@
       '<section><h4>Primary station</h4><div class="twr"><span class="id">'+esc(p.sid||"&mdash;")+'</span><span>'+(p.d!=null?p.d+' km away':'distance n/a')+'</span></div></section>'+
       '<section><h4>Towers that contributed hours'+(p.ttc?' ('+p.ttc+' tried)':'')+'</h4>'+ctwHtml+
         '<div class="note">Nearest-first fill; share of this plant&rsquo;s valid hours shown. Per-tower distance isn&rsquo;t in this release (primary distance above).</div></section>'+
-      '<section><h4>Towers that set the ECWT (coldest tail)</h4>'+ctpHtml+'</section>';
+      '<section><h4>Towers that set the ECWT (coldest tail)</h4>'+ctpHtml+'</section>'+
+      '<section><h4>Compliance worksheet</h4>'+
+        '<button class="rsaw-btn" id="rsawBtn"'+(p.e==null?' disabled':'')+'>Generate RSAW R1 worksheet</button>'+
+        '<div class="note">'+(p.e==null
+          ? 'No published ECWT for this row, so the R1 calculation evidence cannot be completed.'
+          : 'Pre-fills the EOP-012-3 R1 (ECWT calculation) Registered Entity Response for this unit from the release data, then downloads a printable worksheet.')+'</div></section>';
     detail.classList.add("show");
     document.getElementById("detailClose").onclick=closeDetail;
+    var rb=document.getElementById("rsawBtn");
+    if(rb && !rb.disabled) rb.onclick=function(){downloadRSAW(p);};
     drawMap();
   }
   cv.addEventListener("click",function(ev){
@@ -354,6 +365,103 @@
     if(best) openDetail(best);
   });
   document.addEventListener("keydown",function(e){if(e.key==="Escape")closeDetail();});
+
+  // ---------- RSAW (EOP-012-3 R1) WORKSHEET GENERATOR ----------
+  function calcDate(){
+    var s=(q.releaseId||"")+" "+(q.adrRunId||"");
+    var m=s.match(/(20\d{2})(\d{2})(\d{2})/);
+    return m ? m[1]+"-"+m[2]+"-"+m[3] : "";
+  }
+  function slug(s){return (String(s||"plant").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,60))||"plant";}
+  function buildRSAW(p){
+    var E=esc;
+    var calc=calcDate();
+    var adjusted=(p.fh||0)>0;
+    var ctw=p.ctw||[];
+    var stationList=ctw.map(function(t){return E(t[0])+" ("+t[1].toLocaleString()+" hrs)";}).join("; ");
+    var moreT=(p.ctwN||ctw.length)-ctw.length;
+    if(moreT>0) stationList+="; + "+moreT+" additional NOAA station"+(moreT>1?"s":"");
+    var coldTail=(p.ctp||[]).map(function(t){var pr=String(t[0]).split("|");
+      return E(pr[0])+(pr[1]?" ["+E(pr[1].replace(/_/g," "))+"]":"")+" ("+t[1]+" hrs)";}).join("; ")||"&mdash;";
+    var cov=p.cov!=null?p.cov.toFixed(1)+"%":"&mdash;";
+    var hrs=(p.vh!=null?p.vh.toLocaleString():"&mdash;")+(p.eh!=null?" of "+p.eh.toLocaleString()+" expected winter hours":"");
+    var facility=E(p.n||"(unnamed unit)")+(p.eia?" (EIA plant code "+E(p.eia)+")":"");
+    var loc=[p.cty?E(p.cty)+" County":"",E(p.s||"")].filter(Boolean).join(", ");
+    var primary=E(p.sid||"&mdash;")+(p.d!=null?", approximately "+p.d+" km from the unit":"");
+    var adjText=adjusted
+      ? "Yes. Winter hours not observed at the primary station were composited from the nearest available NOAA stations on a nearest-first basis. "+
+        (p.fh!=null?p.fh.toLocaleString()+" of the "+(p.vh!=null?p.vh.toLocaleString():"")+" populated hours":"A portion of the populated hours")+
+        " were sourced from stations other than the primary station; assembled winter-hour coverage was "+cov+"."
+      : "No. The primary station provided sufficient valid winter-hour data; no fill from neighboring stations was applied. Assembled winter-hour coverage was "+cov+".";
+    var narrative="The Extreme Cold Weather Temperature (ECWT) for "+facility+" was calculated as <b>"+fmt(p.e)+"&deg;F</b>"+
+      (p.dr!=null?" (discrete-rank value "+fmt(p.dr)+"&deg;F)":"")+
+      ". The value is the lowest 0.2 percentile of hourly dry-bulb air temperatures for the meteorological winter months (December, January, February) over the period "+
+      E(q.coverageBasis||"December–February since 2000")+", consistent with the EOP-012 ECWT methodology (Excel PERCENTILE.INC / percentile_cont at 0.002). "+
+      "Temperature data were obtained from NOAA Global Hourly (Integrated Surface Database) observations. The primary weather station was "+primary+". "+
+      (adjusted?"Winter hours not observed at the primary station were composited from the nearest available stations as described under adjustments below; ":"")+
+      hrs+" were populated ("+cov+"). This worksheet documents Requirement R1 (ECWT calculation, calculation date, sources of temperature data, and adjustments for missing or invalid data) only.";
+    function row(k,v){return '<tr><td class="k">'+k+'</td><td>'+v+'</td></tr>';}
+    function box(on){return on?'&#9746;':'&#9744;';} // checked / empty ballot box
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
+      '<title>RSAW EOP-012-3 R1 — '+facility+'</title><style>'+
+      'body{font-family:Calibri,Segoe UI,Arial,sans-serif;color:#1b2330;font-size:12.5px;line-height:1.45;max-width:860px;margin:24px auto;padding:0 20px}'+
+      'h1{font-size:18px;margin:0 0 2px}h2{font-size:14px;margin:22px 0 6px;border-bottom:2px solid #1f5fa8;padding-bottom:3px;color:#163a63}'+
+      '.sub{color:#647089;font-size:12px;margin-bottom:14px}'+
+      'table{width:100%;border-collapse:collapse;margin:6px 0 4px}'+
+      'td{border:1px solid #c9d2df;padding:6px 8px;vertical-align:top}'+
+      'td.k{width:230px;background:#eef4fb;font-weight:600}'+
+      '.fill{background:#eafbea}.blank{background:#fff;color:#8a93a3;font-style:italic}'+
+      '.req{background:#eef4fb;font-size:11.5px;color:#24405f;padding:8px 10px;border-left:4px solid #1f5fa8;margin:6px 0}'+
+      '.narr{background:#eafbea;border:1px solid #bfe3bf;border-radius:4px;padding:10px 12px;margin:6px 0}'+
+      '.foot{color:#647089;font-size:11px;margin-top:22px;border-top:1px solid #e3e7ee;padding-top:10px}'+
+      '@media print{body{margin:0}.noprint{display:none}}'+
+      '</style></head><body>'+
+      '<h1>Reliability Standard Audit Worksheet — EOP-012-3</h1>'+
+      '<div class="sub">Extreme Cold Weather Preparedness and Operations &middot; Requirement R1 (Generator Owner) &middot; Registered Entity Response, pre-filled</div>'+
+      '<h2>Facility and entity</h2><table>'+
+      row("Standard","EOP-012-3 — Extreme Cold Weather Preparedness and Operations")+
+      row("Requirement","R1 (Applicable function: Generator Owner)")+
+      row("Registered Entity",'<span class="blank">[entity to complete]</span>')+
+      row("NCR Number",'<span class="blank">[NCRnnnnn — entity to complete]</span>')+
+      row("Generating unit / facility",'<span class="fill">'+facility+'</span>')+
+      row("Location",'<span class="fill">'+(loc||"&mdash;")+'</span>')+
+      '</table>'+
+      '<h2>R1 — ECWT calculation (Registered Entity Response)</h2>'+
+      '<div class="req">R1. At least once every five (5) calendar years, each Generator Owner shall, for each applicable generating unit, calculate the Extreme Cold Weather Temperature and identify the calculation date, source(s) of temperature data, and adjustments utilized for missing or invalid hourly temperature data, if necessary.</div>'+
+      '<table>'+
+      row("Extreme Cold Weather Temperature (ECWT)",'<span class="fill"><b>'+fmt(p.e)+'&deg;F</b>'+(p.dr!=null?' (discrete-rank '+fmt(p.dr)+'&deg;F)':'')+'</span>')+
+      row("ECWT calculation date",'<span class="fill">'+(calc||'<span class="blank">[see release]</span>')+'</span>')+
+      row("Calculation method",'Lowest 0.2 percentile of hourly dry-bulb temperatures, meteorological winter (DJF). Basis: <span class="fill">'+E(q.coverageBasis||"DJF since 2000")+'</span>')+
+      row("Source(s) of temperature data",'<span class="fill">NOAA Global Hourly (Integrated Surface Database). Primary station: '+primary+'.</span>')+
+      row("Contributing stations",'<span class="fill">'+(stationList||"&mdash;")+'</span>')+
+      row("Stations setting the coldest tail",'<span class="fill">'+coldTail+'</span>')+
+      row("Assembled winter-hour coverage",'<span class="fill">'+hrs+' ('+cov+'); confidence tier: '+E((p.t||"").replace(/_/g," ")||"&mdash;")+(p.nr?' (flagged: needs review)':'')+'</span>')+
+      '</table>'+
+      '<h2>Adjustments for missing or invalid data</h2>'+
+      '<div class="req">Question: During the calculation of ECWT, did you make any adjustments to the raw data for missing or invalid data? If Yes, provide an explanation of the adjustments for the generating unit(s).</div>'+
+      '<p style="font-size:13px">'+box(adjusted)+' Yes &nbsp;&nbsp; '+box(!adjusted)+' No</p>'+
+      '<div class="narr">'+adjText+'</div>'+
+      '<h2>Compliance narrative</h2><div class="narr">'+narrative+'</div>'+
+      '<h2>Registered Entity evidence</h2><table>'+
+      '<tr><td class="k">File / source</td><td class="k">Document title</td><td class="k">Version</td><td class="k">Date</td><td class="k">Relevant section</td></tr>'+
+      '<tr><td class="fill">'+E(q.releaseId||"ECWT release")+'</td><td class="fill">EOP-012-3 ADR-0005 ECWT release &amp; dashboard</td><td class="fill">'+E(q.adrRunId||"&mdash;")+'</td><td class="fill">'+(calc||"&mdash;")+'</td><td class="fill">Row for '+facility+'</td></tr>'+
+      '</table>'+
+      '<div class="foot">Generated from the public repository <b>thewhitebuffalo/eop012-ecwt</b> ECWT release for the purpose of preparing the EOP-012-3 R1 Registered Entity Response. '+
+      'This worksheet is analytical and is not, by itself, a compliance filing; values should be reviewed by the registered entity before submission. '+
+      'It covers Requirement R1 only — R2 through R9 (freeze-protection measures, Corrective Action Plans, declarations, generating-unit minimums, etc.) require entity documentation outside this dataset. '+
+      'Per the standard, an ECWT is required for each generating unit; where this value covers all units at the site, note that in the entity response.</div>'+
+      '<p class="noprint" style="color:#647089;font-size:11px">Tip: use your browser&rsquo;s Print &rarr; Save as PDF to file this worksheet, or paste the green entity-supplied fields into the official RSAW.</p>'+
+      '</body></html>';
+  }
+  function downloadRSAW(p){
+    var html=buildRSAW(p);
+    var blob=new Blob([html],{type:"text/html;charset=utf-8"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url; a.download="RSAW_EOP-012-3_R1_"+slug(p.n)+".html";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(url); if(a.parentNode)a.parentNode.removeChild(a);},0);
+  }
 
   // ---------- PLANT NAME SEARCH ----------
   (function(){
