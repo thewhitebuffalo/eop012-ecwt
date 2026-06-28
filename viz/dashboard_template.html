@@ -39,6 +39,21 @@
   .controls button{font:inherit;font-size:12px;border:1px solid var(--line);background:#fff;
     color:var(--ink);padding:4px 10px;border-radius:20px;cursor:pointer}
   .controls button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .mapsearch{position:relative;margin-bottom:10px;max-width:380px}
+  .mapsearch input{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:7px 11px;
+    border:1px solid var(--line);border-radius:6px;background:#fff}
+  .mapsearch input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(31,95,168,.12)}
+  .mapsearch .results{position:absolute;top:100%;left:0;right:0;z-index:15;background:#fff;
+    border:1px solid var(--line);border-radius:6px;margin-top:3px;max-height:300px;overflow:auto;
+    box-shadow:0 6px 18px rgba(0,0,0,.12);display:none}
+  .mapsearch .results.show{display:block}
+  .mapsearch .item{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+    padding:6px 11px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f0f2f6}
+  .mapsearch .item:last-child{border-bottom:none}
+  .mapsearch .item:hover,.mapsearch .item.active{background:#eef4fb}
+  .mapsearch .item .nm{font-weight:560}
+  .mapsearch .item .meta{color:var(--muted);white-space:nowrap;font-size:11.5px}
+  .mapsearch .empty{padding:7px 11px;color:var(--muted);font-size:12px}
   .tip{position:fixed;pointer-events:none;background:#11161f;color:#fff;font-size:11.5px;
     padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .08s;max-width:220px;z-index:9;box-shadow:0 4px 14px rgba(0,0,0,.25)}
   .tip b{color:#7fc2ff}
@@ -80,11 +95,15 @@
   <div class="grid">
     <div class="card full">
       <h2>Where the cold is — ECWT by plant location (CONUS)</h2>
-      <div class="h-sub">Each point is a generating plant, colored by its ECWT. Hover for a quick read; click a plant for full details.</div>
+      <div class="h-sub">Each point is a generating plant, colored by its ECWT. Search or click a plant for full details; hover for a quick read.</div>
       <div class="controls" id="mapctl">
         <button data-mode="temp" class="on">Color: ECWT (&deg;F)</button>
         <button data-mode="below">Highlight ECWT &lt; 32&deg;F</button>
         <button data-mode="dist">Color: station distance</button>
+      </div>
+      <div class="mapsearch">
+        <input type="search" id="plantSearch" placeholder="Search plant name&hellip;" autocomplete="off" aria-label="Search plant name">
+        <div class="results" id="searchResults"></div>
       </div>
       <canvas id="map"></canvas>
       <div class="legend" id="maplegend">
@@ -335,6 +354,57 @@
     if(best) openDetail(best);
   });
   document.addEventListener("keydown",function(e){if(e.key==="Escape")closeDetail();});
+
+  // ---------- PLANT NAME SEARCH ----------
+  (function(){
+    var box=document.getElementById("plantSearch"), rez=document.getElementById("searchResults");
+    var cur=[], active=-1;
+    function render(){
+      if(!cur.length){rez.innerHTML='<div class="empty">No plant names match.</div>';rez.classList.add("show");return;}
+      rez.innerHTML=cur.map(function(p,i){
+        return '<div class="item" data-i="'+i+'"><span class="nm">'+esc(p.n||"(unnamed)")+
+          '</span><span class="meta">'+esc(p.s||"")+' &middot; '+fmt(p.e)+'&deg;F</span></div>';
+      }).join("");
+      rez.classList.add("show");
+    }
+    function mark(){
+      [].forEach.call(rez.querySelectorAll(".item"),function(el){
+        var on=(+el.getAttribute("data-i")===active);
+        el.classList.toggle("active",on);
+        if(on) el.scrollIntoView({block:"nearest"});
+      });
+    }
+    function search(q){
+      q=q.trim().toLowerCase(); active=-1;
+      if(q.length<2){cur=[];rez.classList.remove("show");return;}
+      var out=[];
+      for(var i=0;i<pts.length && out.length<25;i++){
+        if((pts[i].n||"").toLowerCase().indexOf(q)>-1) out.push(pts[i]);
+      }
+      cur=out; render();
+    }
+    function choose(i){
+      if(i<0||i>=cur.length)return;
+      var p=cur[i];
+      box.value=p.n||""; rez.classList.remove("show");
+      openDetail(p);
+    }
+    box.addEventListener("input",function(){search(box.value);});
+    box.addEventListener("focus",function(){if(cur.length)rez.classList.add("show");});
+    box.addEventListener("keydown",function(e){
+      if(e.key==="ArrowDown"){e.preventDefault();active=Math.min(active+1,cur.length-1);mark();}
+      else if(e.key==="ArrowUp"){e.preventDefault();active=Math.max(active-1,0);mark();}
+      else if(e.key==="Enter"){e.preventDefault();choose(active>=0?active:0);}
+      else if(e.key==="Escape"){rez.classList.remove("show");}
+    });
+    rez.addEventListener("mousedown",function(e){
+      var it=e.target.closest&&e.target.closest(".item");
+      if(it){e.preventDefault();choose(+it.getAttribute("data-i"));}
+    });
+    document.addEventListener("click",function(e){
+      if(!(e.target.closest&&e.target.closest(".mapsearch"))) rez.classList.remove("show");
+    });
+  })();
 
   // ---------- HISTOGRAM ----------
   (function(){
