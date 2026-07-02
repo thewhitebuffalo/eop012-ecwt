@@ -1,0 +1,54 @@
+name: Data error report
+description: A plant's ECWT, location, station assignment, or coverage looks wrong
+title: "[data] <plant name>: <short description>"
+labels: ["data-error"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks — reports from people who know their sites are this project's QA
+        program. Fill in what you can; partial reports are still useful.
+  - type: input
+    id: plant
+    attributes:
+      label: Plant name (as shown in the dashboard)
+    validations:
+      required: true
+  - type: input
+    id: eia
+    attributes:
+      label: EIA plant code
+      description: Shown in the plant detail panel, e.g. "EIA 62449"
+  - type: input
+    id: release
+    attributes:
+      label: Release ID
+      description: From the dashboard header or the Release tag, e.g. scoped_plant_ecwt_adr0004_release_20260626T235840Z
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What looks wrong?
+      options:
+        - ECWT value
+        - Plant location / coordinates
+        - Assigned weather station(s)
+        - Coverage / hour counts
+        - Plant identity (name, county, state)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and why?
+      description: |
+        e.g. "Shown ECWT is +4.1F but our design basis and 20 years of local
+        lows suggest well below 0F", or "the primary station is across a
+        mountain range; station X is closer and representative".
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence (optional)
+      description: Design documents, station observations, operating history, links.

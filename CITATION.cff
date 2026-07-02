@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this dataset or tooling, please cite it as below."
+title: "EOP-012 ECWT: Extreme Cold Weather Temperatures for U.S. Generating Plants"
+type: software
+authors:
+  - alias: thewhitebuffalo
+repository-code: "https://github.com/thewhitebuffalo/eop012-ecwt"
+license: MIT
+keywords:
+  - NERC
+  - EOP-012
+  - ECWT
+  - extreme cold weather temperature
+  - grid reliability
+  - EIA-860
+  - NOAA Global Hourly
+abstract: >-
+  Open, auditable calculation of the NERC EOP-012 Extreme Cold Weather
+  Temperature (lowest 0.2 percentile of December-February hourly dry-bulb
+  temperatures since 2000) for U.S. generating plants in the EIA-860
+  universe, from NOAA observational hourly data with per-hour station
+  provenance and a documented publication floor (ADR-0005).

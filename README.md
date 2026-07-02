@@ -1,82 +1,106 @@
-# EOP012 Database Build
+# EOP-012 ECWT — Extreme Cold Weather Temperatures for U.S. Generating Plants
 
-Goal: calculate a documented Extreme Cold Weather Temperature (ECWT) for U.S. generating plants using a clean plant/generator universe, representative weather-source selection, and auditable ECWT calculations.
+An open, auditable calculation of the NERC **EOP-012 Extreme Cold Weather
+Temperature (ECWT)** — the lowest 0.2 percentile of December–February hourly
+dry-bulb temperatures since 2000 — for ~16,000 U.S. generating plants in the
+EIA-860 universe, computed from NOAA observational hourly data with per-hour
+station provenance.
 
-## Current Approach
+- **~15,900 plants** with a published ECWT at ≥95% winter-hour coverage
+  (ADR-0005 publication floor); rows below the floor are held, not guessed.
+- Every published value traces to its NOAA stations, hour counts, and coverage.
+- MIT licensed. Analytical output — **not a compliance filing** (see
+  [Disclaimers](#disclaimers)).
 
-1. Use EIA-860 as the primary plant and generator universe.
-2. Use NOAA hourly dry-bulb weather data for the ECWT calculation.
-3. Keep raw source files immutable.
-4. Store all source provenance, station-selection decisions, coverage checks, and calculation outputs explicitly.
+## Get the ECWT for your plant
 
-## Release outputs
+- **Interactive dashboard:**
+  [thewhitebuffalo.github.io/eop012-ecwt](https://thewhitebuffalo.github.io/eop012-ecwt/) —
+  or download the self-contained
+  [`build/EOP012_ADR0004_ECWT_dashboard.html`](build/EOP012_ADR0004_ECWT_dashboard.html)
+  and open it locally (fully offline, no network calls). Search your plant by
+  name or click it on the map; the detail panel shows the ECWT, coverage,
+  contributing weather stations and distances, and the stations that set the
+  coldest tail.
+- **Full data:** download the scoped release CSV
+  (`scoped_plant_ecwt_*_release_*.csv`) from the matching
+  [Release](https://github.com/thewhitebuffalo/eop012-ecwt/releases). Each row
+  carries the plant's ECWT plus its complete provenance. Verify downloads
+  against the `*_SHA256SUMS.txt` manifest kept in
+  [`data/processed/`](data/processed/).
 
-The per-run ECWT outputs are large (the full results, scoped release, per-hour cold-tail provenance, and source tables total roughly 500 MB) and regenerate on every run, so they are **published as GitHub Release assets rather than committed to Git history.** This keeps clones fast while keeping every published value auditable and downloadable.
+## Generate a NERC RSAW R1 worksheet
 
-- **Audit or verify a published value:** download the scoped release CSV (`scoped_plant_ecwt_*_release_*.csv`) from the matching [Release](https://github.com/thewhitebuffalo/eop012-ecwt/releases). Each row carries the plant's ECWT plus its station provenance and coverage.
-- **Verify integrity:** the small `*_SHA256SUMS.txt` manifest is kept in the repo under `data/processed/` so any downloaded Release asset can be checksummed against what was published.
-- **Reproduce:** regenerate the outputs with the pipeline, then build the dashboard with `scripts/build_ecwt_dashboard.py --release-csv <scoped CSV>`.
-- The self-contained dashboard (`build/EOP012_ADR0004_ECWT_dashboard.html`) embeds the published results and stays in the repo as the viewable artifact.
+Select a plant in the dashboard and click **Generate RSAW R1 worksheet** to
+download an editable Word document pre-filling the EOP-012-3 Requirement R1
+Registered Entity Response (ECWT value, calculation date, temperature-data
+sources, missing-data adjustments, compliance narrative) from the published
+record. R1 is the only requirement this dataset can document; review before
+submission. See [`docs/rsaw/`](docs/rsaw/) for the NERC source worksheet and
+the field-by-field mapping.
 
-Output CSVs under `data/processed/` are git-ignored (see `.gitignore`); attach them to the tagged Release for each run instead of committing them.
+## Methodology and auditability
 
-## Local Configuration
+- **Method:** for each plant, populate all ~55,000 winter hours from the
+  nearest NOAA stations outward, keep per-hour provenance, then take the
+  lowest 0.2 percentile (Excel `PERCENTILE.INC` / `percentile_cont` at 0.002).
+  Details: [`docs/methodology.md`](docs/methodology.md).
+- **Decisions:** the ADR series in [`docs/adr/`](docs/adr/) records every
+  methodological decision, including the
+  [ADR-0005 publication floor](docs/adr/0005-ecwt-publication-floor.md).
+- **Validation:** every release is checked by
+  [`scripts/validate_ecwt_release.py`](scripts/validate_ecwt_release.py)
+  ([how to run](docs/validating_ecwt_release.md)) and checksummed.
+- **Findings:** data-integrity issues are documented openly in
+  [`docs/findings/`](docs/findings/) and [`docs/whitepaper/`](docs/whitepaper/).
 
-Scripts can run from any clone path. Defaults come from environment variables in
-`.env.example`, and every important path also has a command-line override.
+## Repository layout
+
+| Path | What it is |
+| --- | --- |
+| `scripts/` | Pipeline and analysis scripts (Python stdlib + Postgres via `psql`) |
+| `docs/` | Methodology, ADRs, data dictionary, findings, RSAW mapping |
+| `viz/` + `build/` | Dashboard template, builder assets, and the built dashboard |
+| `data/processed/` | Release checksum manifests (data CSVs live in Releases) |
+| `tests/` | Test suite — run `python tests/run_all.py` |
+| `sql/` | Audit schema |
+
+## Reproduce
+
+The pipeline runs on Python 3.10+ (standard library; `openpyxl` only for the
+Excel export) against a local PostgreSQL loaded from EIA-860 and NOAA Global
+Hourly. Setup and data loading: [`docs/REPRODUCING.md`](docs/REPRODUCING.md).
+Rebuild the dashboard from any scoped release CSV:
 
 ```bash
-cp .env.example .env
-set -a
-source .env
-set +a
+python scripts/build_ecwt_dashboard.py \
+  --release-csv scoped_plant_ecwt_<...>_release_<ts>.csv \
+  --output build/EOP012_ADR0004_ECWT_dashboard.html
 ```
 
-Key paths:
+Release outputs are large (~500 MB/run) and regenerate on every run, so they
+are published as **GitHub Release assets**, never committed
+(`data/processed/*.csv` is git-ignored).
 
-- `EOP012_PROJECT_ROOT`: local repository clone.
-- `EOP012_DATA_ROOT`: external working-data root for raw files, staging files, and local database clusters.
-- `EOP012_EIA860_ZIP`: EIA-860 2024 final ZIP.
-- `EOP012_STAGING_ROOT`: generated CSV staging directory.
-- `EOP012_NOAA_GLOBAL_HOURLY_ROOT`: NOAA Global Hourly raw-file cache.
-- `EOP012_NOAA_RAW_ROOTS`: colon-separated NOAA raw-file cache roots used by inventory scans.
-- `EOP012_PSQL`: PostgreSQL `psql` client binary.
+## Contribute or report a data error
 
-## Immediate Baseline
+The most valuable contribution is a **data error report** from someone who
+knows a site: if a plant's ECWT, location, or station assignment looks wrong,
+[open a data-error issue](https://github.com/thewhitebuffalo/eop012-ecwt/issues/new/choose)
+with the plant name, EIA code, and what you expected. Code and docs PRs are
+welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). CI runs the test suite on
+every PR.
 
-The first baseline is EIA-860 2024 final annual data. By default scripts look at:
+## Support the project
 
-`$EOP012_EIA860_ZIP`
+If the dashboard or an RSAW worksheet saved you real time, you can
+[give back what it was worth](https://www.buymeacoffee.com/whitebuffalo) —
+contributions keep the dataset current and free for everyone.
 
-The 2025 early release is available for comparison/currentness but should remain provisional until EIA publishes final 2025 data.
+## Disclaimers
 
-## Rebuild Outputs
-
-- `data/processed/eia860_*/`: generated normalized CSV extracts.
-- `docs/eia860_asset_inventory.md`: generated inventory report for the plant/generator universe.
-- `scripts/build_eia860_asset_inventory.py`: reproducible EIA-860 extractor and auditor.
-
-Generated run products such as timestamped CSVs, release extracts, per-run QA reports,
-and `data/processed/*` files are working artifacts until they are promoted. When a
-run is intentionally published, commit the scoped CSV/results, dashboards, manifests,
-status notes, and checksums to Git so the public repository carries the auditable
-release surface.
-
-## Publication Model
-
-GitHub is the audit/control plane for this project, not the heavy weather-data warehouse.
-
-- Commit code, schemas, methodology, manifests, checksums, QA reports, release CSVs,
-  result CSVs, published dashboards, and small previews.
-- Keep heavyweight NOAA hourly data and working databases under `EOP012_DATA_ROOT` or another external cache.
-- Publish versioned release artifacts with checksums and enough provenance to reproduce every ECWT value.
-- Never commit large raw ZIPs, Postgres clusters, DuckDB files, Parquet bundles, raw NOAA caches, or local database directories directly to Git.
-
-See:
-
-- `docs/REPRODUCING.md`
-- `docs/publication_plan.md`
-- `docs/methodology.md`
-- `docs/audit_schema.md`
-- `docs/data_dictionary.md`
-- `sql/audit_schema.sql`
+This project is analytical. Generated worksheets and published values are not,
+by themselves, compliance filings; registered entities must review values and
+documentation before use. The NERC RSAW template in `docs/rsaw/` is NERC's
+property, included with attribution to support compliance preparation — always
+confirm the current version at [nerc.com](https://www.nerc.com/).
