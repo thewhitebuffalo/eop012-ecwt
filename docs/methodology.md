@@ -94,6 +94,8 @@ NOAA Global Hourly rows are not all equivalent evidence. The canonical loader ap
 
 The publication QA report must disclose the exact reject-source-code set used for the run and reconcile plausibility rejects against load-file counters before release.
 
+For land-plant composites, ADR-0006 restricts the observational hierarchy to land stations. FM-13 ship-format observations and NOAA ISD marine/buoy/C-MAN platform IDs in the 997xxx, 998xxx, and 999xxx-99999 classes are excluded from station candidates and composite fill because their air temperatures are water-modulated and marine sensor rail failures can pass global-plausibility QC.
+
 ## Time Window
 
 Include only observations that meet all of these conditions:

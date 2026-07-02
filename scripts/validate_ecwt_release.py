@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a regenerated ECWT release CSV against the ADR-0005 acceptance rules.
+"""Validate a regenerated ECWT release CSV against the ADR-0006 acceptance rules.
 
 Run this against the committed results CSV after a rebuild to get a one-pass
 PASS / WARN / FAIL / INFO readout. Standard library only; no DB or network.
@@ -23,6 +23,10 @@ Checks:
   5. state_range       INFO: widest / narrowest states (expect CA/AZ widest)
   6. provenance        FAIL if a cold-tail CSV is given and a published plant
                        has no provenance row (best-effort plant-id match)
+  7. marine_low_outlier FAIL if release-row cold-tail provenance shows marine
+                       dominance on a plant far below its state median
+  8. tail_dominated_non_primary
+                       WARN if one non-primary station sets most cold-tail hours
 
 Column names are auto-detected from a list of candidates so the script tolerates
 minor schema drift; coverage falls back to valid/expected hours if no coverage
@@ -33,8 +37,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from dataclasses import dataclass
+from statistics import median
+
+from station_filters import is_marine_platform_station_id
 
 C_STATE = ["plant_state", "state"]
 C_ECWT = ["ecwt_f", "ecwt", "ecwt_fahrenheit"]
@@ -44,6 +52,8 @@ C_COV = ["coverage", "coverage_ratio", "fixed_period_coverage"]
 C_VALID = ["valid_hour_count", "valid_djf_hours", "valid_hours"]
 C_EXP = ["expected_hour_count", "expected_djf_hours", "expected_hours"]
 C_PID = ["plant_id", "eia_plant_code", "plant_code", "plant_name"]
+C_PRIMARY = ["primary_station_id", "selected_station_id"]
+C_COLD_TAIL = ["cold_tail_provenance", "cold_tail_provenance_json"]
 
 PUBLISHED_TIERS = {"complete", "adequate"}
 
@@ -58,6 +68,8 @@ class Cols:
     valid: str | None
     exp: str | None
     pid: str | None
+    primary: str | None = None
+    cold_tail: str | None = None
 
 
 @dataclass
@@ -120,6 +132,41 @@ def coverage_of(row, cols):
     return None
 
 
+def _json_counts(value):
+    value = (value or "").strip()
+    if value in ("", r"\N"):
+        return {}
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    out = {}
+    for key, count in raw.items():
+        try:
+            n = int(count)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[str(key)] = n
+    return out
+
+
+def _station_from_tail_key(key: str) -> str:
+    return str(key).split("|", 1)[0].strip()
+
+
+def cold_tail_station_counts(row, cols):
+    if not cols.cold_tail:
+        return {}
+    counts = {}
+    for key, count in _json_counts(row.get(cols.cold_tail)).items():
+        station_id = _station_from_tail_key(key)
+        if not station_id:
+            continue
+        counts[station_id] = counts.get(station_id, 0) + count
+    return counts
+
+
 def status_of(row, cols):
     """published | held | blocked."""
     if cols.pub:
@@ -142,6 +189,17 @@ def status_of(row, cols):
 
 
 def run_checks(rows, cols, cfg, cold_tail_pids=None):
+    cfg = {
+        "min_cov": 0.95,
+        "warn_ecwt": 60.0,
+        "fail_ecwt": 70.0,
+        "prior": 123,
+        "low_side_warn": 10.0,
+        "min_state_peers": 5,
+        "marine_tail_fail_share": 0.50,
+        "single_tail_warn_share": 0.80,
+        **cfg,
+    }
     out = []
     published = [r for r in rows if status_of(r, cols) == "published"]
     held = [r for r in rows if status_of(r, cols) == "held"]
@@ -199,12 +257,18 @@ def run_checks(rows, cols, cfg, cold_tail_pids=None):
         out.append(Check("publishable_count", "PASS", f"{n} publishable plants (prior {cfg['prior']})"))
 
     # 5. per-state ECWT range (informational sanity)
+    state_medians = {}
     if cols.state and vals:
         bystate = {}
         for r, v in vals:
             s = str(r.get(cols.state, "")).strip()
             if s:
                 bystate.setdefault(s, []).append(v)
+        state_medians = {
+            state: median(state_vals)
+            for state, state_vals in bystate.items()
+            if len(state_vals) >= cfg["min_state_peers"]
+        }
         ranges = sorted(((s, max(vs) - min(vs), len(vs)) for s, vs in bystate.items() if len(vs) >= 2),
                         key=lambda x: x[1], reverse=True)
         if ranges:
@@ -214,7 +278,79 @@ def run_checks(rows, cols, cfg, cold_tail_pids=None):
                              f"widest: {top} | narrowest: {bot} | "
                              f"expect CA/AZ widest, ND/MT/MN/FL/HI narrow"))
 
-    # 6. provenance (optional)
+    # 6. low-side state median and marine-platform tail dominance
+    if cols.state and cols.cold_tail and state_medians:
+        low_rows = []
+        marine_fail = []
+        for r, v in vals:
+            state = str(r.get(cols.state, "")).strip()
+            med = state_medians.get(state)
+            if med is None:
+                continue
+            delta = med - v
+            if delta < cfg["low_side_warn"]:
+                continue
+            counts = cold_tail_station_counts(r, cols)
+            total = sum(counts.values())
+            marine = sum(
+                count for station_id, count in counts.items()
+                if is_marine_platform_station_id(station_id)
+            )
+            marine_share = marine / total if total else 0.0
+            low_rows.append((r, v, state, med, delta, marine_share))
+            if marine_share > cfg["marine_tail_fail_share"]:
+                marine_fail.append((r, v, state, med, delta, marine_share))
+        if marine_fail:
+            ex = ", ".join(
+                f"{pid(r, cols)} {state} {v:.1f}F vs median {med:.1f}F, "
+                f"marine tail {share:.0%}"
+                for r, v, state, med, delta, share in marine_fail[:5]
+            )
+            out.append(Check("marine_low_outlier", "FAIL",
+                             f"{len(marine_fail)} published plants are >="
+                             f"{cfg['low_side_warn']:.0f}F below state median with >"
+                             f"{cfg['marine_tail_fail_share']:.0%} marine-platform cold-tail hours: {ex}"))
+        else:
+            out.append(Check("marine_low_outlier", "PASS",
+                             "no low-side state-median outlier is dominated by marine-platform cold-tail hours"))
+        if low_rows:
+            ex = ", ".join(
+                f"{pid(r, cols)} {state} {v:.1f}F vs median {med:.1f}F"
+                for r, v, state, med, delta, share in low_rows[:5]
+            )
+            out.append(Check("state_low_outlier", "WARN",
+                             f"{len(low_rows)} published plants are >="
+                             f"{cfg['low_side_warn']:.0f}F below state median; review representativeness: {ex}"))
+        else:
+            out.append(Check("state_low_outlier", "PASS",
+                             f"no published plant is >= {cfg['low_side_warn']:.0f}F below its state median"))
+
+    # 7. single non-primary station dominance in the cold tail
+    if cols.cold_tail and cols.primary:
+        dominated = []
+        for r in published:
+            counts = cold_tail_station_counts(r, cols)
+            total = sum(counts.values())
+            if not total:
+                continue
+            station_id, count = max(counts.items(), key=lambda kv: kv[1])
+            share = count / total
+            primary = str(r.get(cols.primary, "")).strip()
+            if station_id != primary and share > cfg["single_tail_warn_share"]:
+                dominated.append((r, station_id, share, count, total))
+        if dominated:
+            ex = ", ".join(
+                f"{pid(r, cols)} {station_id} {share:.0%} ({count}/{total})"
+                for r, station_id, share, count, total in dominated[:5]
+            )
+            out.append(Check("tail_dominated_non_primary", "WARN",
+                             f"{len(dominated)} published plants have >"
+                             f"{cfg['single_tail_warn_share']:.0%} of cold-tail hours from one non-primary station: {ex}"))
+        else:
+            out.append(Check("tail_dominated_non_primary", "PASS",
+                             "no published plant cold tail is dominated by one non-primary station"))
+
+    # 8. provenance (optional)
     if cold_tail_pids is not None:
         missing = [r for r in published if pid(r, cols) not in cold_tail_pids]
         if missing:
@@ -235,7 +371,9 @@ def _resolve_cols(fieldnames):
     return Cols(state=find_col(fieldnames, C_STATE), ecwt=ecwt,
                 tier=find_col(fieldnames, C_TIER), pub=find_col(fieldnames, C_PUB),
                 cov=find_col(fieldnames, C_COV), valid=find_col(fieldnames, C_VALID),
-                exp=find_col(fieldnames, C_EXP), pid=find_col(fieldnames, C_PID))
+                exp=find_col(fieldnames, C_EXP), pid=find_col(fieldnames, C_PID),
+                primary=find_col(fieldnames, C_PRIMARY),
+                cold_tail=find_col(fieldnames, C_COLD_TAIL))
 
 
 def _load_pids(paths):
@@ -259,6 +397,14 @@ def main():
     ap.add_argument("--warn-ecwt", type=float, default=60.0)
     ap.add_argument("--fail-ecwt", type=float, default=70.0)
     ap.add_argument("--prior-publishable", type=int, default=123)
+    ap.add_argument("--low-side-warn", type=float, default=10.0,
+                    help="WARN when a plant ECWT is this many F below its state median")
+    ap.add_argument("--min-state-peers", type=int, default=5,
+                    help="minimum published rows needed before using a state's median")
+    ap.add_argument("--marine-tail-fail-share", type=float, default=0.50,
+                    help="FAIL low-side outliers when marine-platform stations exceed this cold-tail share")
+    ap.add_argument("--single-station-tail-warn-share", type=float, default=0.80,
+                    help="WARN when one non-primary station exceeds this cold-tail share")
     a = ap.parse_args()
 
     with open(a.results_csv, newline="", encoding="utf-8-sig") as f:
@@ -268,7 +414,11 @@ def main():
     cold_paths = [p for group in (a.cold_tail_csv or []) for p in group]
     cold = _load_pids(cold_paths) if cold_paths else None
     cfg = {"min_cov": a.min_coverage, "warn_ecwt": a.warn_ecwt,
-           "fail_ecwt": a.fail_ecwt, "prior": a.prior_publishable}
+           "fail_ecwt": a.fail_ecwt, "prior": a.prior_publishable,
+           "low_side_warn": a.low_side_warn,
+           "min_state_peers": a.min_state_peers,
+           "marine_tail_fail_share": a.marine_tail_fail_share,
+           "single_tail_warn_share": a.single_station_tail_warn_share}
 
     checks = run_checks(rows, cols, cfg, cold)
     print(f"ECWT release validation: {a.results_csv}  ({len(rows)} rows)")

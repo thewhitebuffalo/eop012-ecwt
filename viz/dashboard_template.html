@@ -548,22 +548,23 @@
     var loc=[p.cty?p.cty+" County":"",p.s||""].filter(Boolean).join(", ");
     var primary=(p.sid||"--")+(p.d!=null?", approximately "+p.d+" km from the unit":"");
     var deg=String.fromCharCode(176);
+    var landScope="For land-plant composites, ADR-0006 restricts the observational hierarchy to land stations and excludes FM-13 ship-format records and 997xxx/998xxx/999xxx-99999 marine, buoy, and C-MAN platforms.";
     var adjText=adjusted
       ? "Yes. Winter hours not observed at the primary station were composited from the nearest available NOAA stations on a nearest-first basis. "+
         (p.fh!=null?p.fh.toLocaleString()+" of the "+(p.vh!=null?p.vh.toLocaleString():"")+" populated hours":"A portion of the populated hours")+
-        " were sourced from stations other than the primary station; assembled winter-hour coverage was "+cov+"."
-      : "No. The primary station provided sufficient valid winter-hour data; no fill from neighboring stations was applied. Assembled winter-hour coverage was "+cov+".";
+        " were sourced from stations other than the primary station; assembled winter-hour coverage was "+cov+". "+landScope
+      : "No. The primary station provided sufficient valid winter-hour data; no fill from neighboring stations was applied. Assembled winter-hour coverage was "+cov+". "+landScope;
     var narrative="The Extreme Cold Weather Temperature (ECWT) for "+facility+" was calculated as "+fmt(p.e)+deg+"F"+
       (p.dr!=null?" (discrete-rank value "+fmt(p.dr)+deg+"F)":"")+
       ". The value is the lowest 0.2 percentile of hourly dry-bulb air temperatures for the meteorological winter months (December, January, February) over the period "+
       (q.coverageBasis||"December-February since 2000")+", consistent with the EOP-012 ECWT methodology (Excel PERCENTILE.INC / percentile_cont at 0.002). "+
-      "Temperature data were obtained from NOAA Global Hourly (Integrated Surface Database) observations. The primary weather station was "+primary+". "+
+      "Temperature data were obtained from NOAA Global Hourly (Integrated Surface Database) observations. "+landScope+" The primary weather station was "+primary+". "+
       (adjusted?"Winter hours not observed at the primary station were composited from the nearest available stations as described under adjustments below; ":"")+
       hrs+" were populated ("+cov+"). This worksheet documents Requirement R1 (ECWT calculation, calculation date, sources of temperature data, and adjustments for missing or invalid data) only.";
     return {
       calc:calc, adjusted:adjusted, stationList:stationList, coldTail:coldTail,
       cov:cov, hrs:hrs, facility:facility, loc:loc, primary:primary,
-      adjText:adjText, narrative:narrative
+      landScope:landScope, adjText:adjText, narrative:narrative
     };
   }
   function buildRSAW(p){
@@ -571,7 +572,7 @@
     var f=rsawFields(p);
     var facility=E(f.facility), loc=E(f.loc), primary=E(f.primary);
     var stationList=E(f.stationList||"--"), coldTail=E(f.coldTail||"--");
-    var hrs=E(f.hrs), cov=E(f.cov), adjText=E(f.adjText), narrative=E(f.narrative);
+    var hrs=E(f.hrs), cov=E(f.cov), landScope=E(f.landScope), adjText=E(f.adjText), narrative=E(f.narrative);
     function row(k,v){return '<tr><td class="k">'+k+'</td><td>'+v+'</td></tr>';}
     function box(on){return on?'&#9746;':'&#9744;';} // checked / empty ballot box
     return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
@@ -604,6 +605,7 @@
       row("Extreme Cold Weather Temperature (ECWT)",'<span class="fill"><b>'+fmt(p.e)+'&deg;F</b>'+(p.dr!=null?' (discrete-rank '+fmt(p.dr)+'&deg;F)':'')+'</span>')+
       row("ECWT calculation date",'<span class="fill">'+(f.calc||'<span class="blank">[see release]</span>')+'</span>')+
       row("Calculation method",'Lowest 0.2 percentile of hourly dry-bulb temperatures, meteorological winter (DJF). Basis: <span class="fill">'+E(q.coverageBasis||"DJF since 2000")+'</span>')+
+      row("Land-station scope",'<span class="fill">'+landScope+'</span>')+
       row("Source(s) of temperature data",'<span class="fill">NOAA Global Hourly (Integrated Surface Database). Primary station: '+primary+'.</span>')+
       row("Contributing stations",'<span class="fill">'+(stationList||"&mdash;")+'</span>')+
       row("Stations setting the coldest tail",'<span class="fill">'+coldTail+'</span>')+
@@ -668,6 +670,7 @@
       ["Extreme Cold Weather Temperature (ECWT)",fmt(p.e)+String.fromCharCode(176)+"F"+(p.dr!=null?" (discrete-rank "+fmt(p.dr)+String.fromCharCode(176)+"F)":"") ,"EAFBEA"],
       ["ECWT calculation date",f.calc||"[see release]","EAFBEA"],
       ["Calculation method","Lowest 0.2 percentile of hourly dry-bulb temperatures, meteorological winter (DJF). Basis: "+(q.coverageBasis||"DJF since 2000")],
+      ["Land-station scope",f.landScope],
       ["Source(s) of temperature data","NOAA Global Hourly (Integrated Surface Database). Primary station: "+f.primary+"."],
       ["Contributing stations",f.stationList||"--"],
       ["Stations setting the coldest tail",f.coldTail],

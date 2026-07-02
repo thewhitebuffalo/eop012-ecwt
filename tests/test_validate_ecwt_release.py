@@ -25,11 +25,22 @@ def check(name, cond):
 COLS = v.Cols(state="plant_state", ecwt="ecwt_f", tier="confidence_tier",
               pub=None, cov="coverage", valid=None, exp=None, pid="eia_plant_code")
 CFG = {"min_cov": 0.95, "warn_ecwt": 60.0, "fail_ecwt": 70.0, "prior": 2}
+TAIL_COLS = v.Cols(state="plant_state", ecwt="ecwt_f", tier="confidence_tier",
+                   pub=None, cov="coverage", valid=None, exp=None,
+                   pid="eia_plant_code", primary="primary_station_id",
+                   cold_tail="cold_tail_provenance")
 
 
 def row(pid, state, ecwt, tier, cov):
     return {"eia_plant_code": pid, "plant_state": state, "ecwt_f": ecwt,
             "confidence_tier": tier, "coverage": cov}
+
+
+def tail_row(pid, state, ecwt, primary, tail):
+    r = row(pid, state, ecwt, "complete", 1.0)
+    r["primary_station_id"] = primary
+    r["cold_tail_provenance"] = tail
+    return r
 
 
 def st(checks, name):
@@ -110,6 +121,63 @@ def test_provenance_fail():
     check("provenance pass", st(c2, "provenance") == "PASS")
 
 
+def test_marine_low_outlier_fails():
+    rows = [
+        tail_row("1", "MD", -23.4, "724050-13743",
+                 '{"997994-99999|noaa_isd_local_cache|observed":90,"724050-13743|noaa_isd_local_cache|observed":10}'),
+        tail_row("2", "MD", 7.0, "724050-13743",
+                 '{"724050-13743|noaa_isd_local_cache|observed":100}'),
+        tail_row("3", "MD", 8.0, "724050-13743",
+                 '{"724050-13743|noaa_isd_local_cache|observed":100}'),
+        tail_row("4", "MD", 9.0, "724050-13743",
+                 '{"724050-13743|noaa_isd_local_cache|observed":100}'),
+        tail_row("5", "MD", 10.0, "724050-13743",
+                 '{"724050-13743|noaa_isd_local_cache|observed":100}'),
+        tail_row("6", "MD", 11.0, "724050-13743",
+                 '{"724050-13743|noaa_isd_local_cache|observed":100}'),
+    ]
+    c = v.run_checks(rows, TAIL_COLS, CFG)
+    check("marine low fail", st(c, "marine_low_outlier") == "FAIL")
+    check("state low warns", st(c, "state_low_outlier") == "WARN")
+
+
+def test_nonmarine_low_outlier_only_warns():
+    rows = [
+        tail_row("1", "TX", -1.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+        tail_row("2", "TX", 20.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+        tail_row("3", "TX", 21.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+        tail_row("4", "TX", 22.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+        tail_row("5", "TX", 23.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+        tail_row("6", "TX", 24.0, "722430-12960",
+                 '{"722430-12960|noaa_isd_local_cache|observed":100}'),
+    ]
+    c = v.run_checks(rows, TAIL_COLS, CFG)
+    check("nonmarine low pass", st(c, "marine_low_outlier") == "PASS")
+    check("nonmarine low warn", st(c, "state_low_outlier") == "WARN")
+
+
+def test_non_primary_tail_dominance_warns():
+    rows = [
+        tail_row("1", "MI", -9.0, "725370-14840",
+                 '{"726360-14840|noaa_isd_local_cache|observed":90,"725370-14840|noaa_isd_local_cache|observed":10}'),
+        tail_row("2", "MI", -8.0, "725370-14840",
+                 '{"725370-14840|noaa_isd_local_cache|observed":100}'),
+        tail_row("3", "MI", -7.0, "725370-14840",
+                 '{"725370-14840|noaa_isd_local_cache|observed":100}'),
+        tail_row("4", "MI", -6.0, "725370-14840",
+                 '{"725370-14840|noaa_isd_local_cache|observed":100}'),
+        tail_row("5", "MI", -5.0, "725370-14840",
+                 '{"725370-14840|noaa_isd_local_cache|observed":100}'),
+    ]
+    c = v.run_checks(rows, TAIL_COLS, CFG)
+    check("nonprimary dominance warn", st(c, "tail_dominated_non_primary") == "WARN")
+
+
 def test_resolve_prefers_stable_plant_id():
     cols = v._resolve_cols(["plant_id", "eia_plant_code", "plant_state", "ecwt_f"])
     check("plant id preferred", cols.pid == "plant_id")
@@ -135,6 +203,8 @@ def main():
     for fn in [test_clean, test_coverage_fail, test_overcomplete_ratio_is_complete,
                test_backslash_n_is_null, test_held_leak_fail, test_warm_fail,
                test_warm_warn, test_publishable_warn, test_provenance_fail,
+               test_marine_low_outlier_fails, test_nonmarine_low_outlier_only_warns,
+               test_non_primary_tail_dominance_warns,
                test_resolve_prefers_stable_plant_id, test_load_split_cold_tail_pids]:
         fn()
     print(f"OK - {_passed} checks passed")

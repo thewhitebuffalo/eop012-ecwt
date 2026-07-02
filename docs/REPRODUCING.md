@@ -502,7 +502,7 @@ full stage map.
 ## Rebuild The Plant ECWT Layer (the calculation)
 
 Nearest-first composite fill of every DJF hour per plant, per-hour provenance,
-0.2-percentile ECWT, and ADR-0005 confidence tiers:
+0.2-percentile ECWT, confidence tiers, and the current ADR land-station scope:
 
 ```bash
 python scripts/rebuild_adr0004_ecwt_layer.py \
@@ -547,7 +547,7 @@ The SHA-256 manifest covers the immutable data CSVs only — never the
 dashboard, which is a living UI artifact rebuilt for reasons unrelated to the
 data (CI enforces this). `scripts/build_scoped_release_manifest.py` remains a
 supporting tool for older scoped policy-result exports; it was not the final
-manifest-producing step for the current ADR-0005 release.
+manifest-producing step for the 20260626 ADR-0005 release.
 
 ## Validate The Release
 
@@ -557,8 +557,9 @@ python scripts/validate_ecwt_release.py \
   --cold-tail-csv data/processed/plant_ecwt_adr0004_20260626T235840Z_cold_tail_hours_part*.csv
 ```
 
-One pass of PASS/WARN/FAIL/INFO acceptance checks against the ADR-0005 rules
-(coverage floor, held-row nulling, sanity bounds). Details:
+One pass of PASS/WARN/FAIL/INFO acceptance checks against the current release
+rules (coverage floor, held-row nulling, sanity bounds, low-side marine-tail
+detection). Details:
 [`docs/validating_ecwt_release.md`](validating_ecwt_release.md). Do not
 publish a release with a FAIL.
 

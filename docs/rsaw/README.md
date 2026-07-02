@@ -38,7 +38,7 @@ filing. Values should be reviewed by the registered entity before submission.
 | ECWT calculation date | parsed from the release id (`release_id` / `adr0004_run_id` timestamp) |
 | Calculation method | lowest 0.2 percentile (Excel `PERCENTILE.INC` / `percentile_cont` at 0.002) of hourly dry-bulb temperatures, meteorological winter (DJF) |
 | Calculation basis (period) | `coverage_basis` (e.g., fixed-period DJF since 2000-01-01 through the calc date) |
-| Source(s) of temperature data | NOAA Global Hourly (Integrated Surface Database); `primary_station_id` + `primary_station_distance_km`; `contributing_towers`; `cold_tail_provenance` |
+| Source(s) of temperature data | NOAA Global Hourly (Integrated Surface Database); `primary_station_id` + `primary_station_distance_km`; `contributing_towers`; `cold_tail_provenance`; land-plant composites follow ADR-0006 and exclude FM-13 ship-format records plus 997xxx/998xxx/999xxx-99999 marine/buoy/C-MAN platforms |
 | Assembled winter-hour coverage | `valid_hour_count` / `expected_hour_count` and `coverage_ratio`; `confidence_tier`; `needs_review` |
 | Adjustments for missing / invalid data (Yes/No + explanation) | `Yes` when `filled_hour_count > 0`; explanation derived from the nearest-first composite fill (`filled_hour_count`, `coverage_ratio`) |
 | Registered Entity, NCR number | left blank for the Generator Owner to complete |

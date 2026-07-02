@@ -30,9 +30,13 @@ from ecwt_core import (
     provenance_summary,
 )
 from eop012_config import PROJECT_ROOT, PSQL
+from station_filters import (
+    is_land_plant_observation_eligible,
+    is_land_plant_station_eligible,
+)
 
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.5.0-adr0005"
+METHODOLOGY_VERSION = "eop012-ecwt-method-v0.6.0-adr0006"
 DEFAULT_CANDIDATE_PREFIX = "noaa_station_candidates_"
 DEFAULT_RUN_ID = "plant_ecwt_adr0004_20260626T235840Z"
 DEFAULT_RELEASE_ID = "scoped_plant_ecwt_adr0004_release_20260626T235840Z"
@@ -699,7 +703,7 @@ def iter_target_candidates(
                 "balancing_authority_name": row["balancing_authority_name"],
                 "sector_name": row["sector_name"],
             }
-        if row.get("station_id"):
+        if row.get("station_id") and is_land_plant_station_eligible(row["station_id"]):
             candidates.append(
                 {
                     "station_id": row["station_id"],
@@ -718,7 +722,14 @@ def observation_query(station_ids: Iterable[str]) -> str:
     select
         h.station_id,
         h.hour_ending_utc::text as hour_ending_utc,
-        coalesce(h.hour_local::text, '') as hour_local,
+        coalesce(
+            h.hour_local::text,
+            (
+                h.hour_ending_utc at time zone 'UTC'
+                + make_interval(hours => coalesce(st.local_standard_utc_offset_hours, 0))
+            )::text,
+            ''
+        ) as hour_local,
         coalesce(h.obs_timestamp::text, h.hour_ending_utc::text) as obs_timestamp,
         h.dry_bulb_f::double precision::text as dry_bulb_f,
         coalesce(h.source_channel::text, 'noaa_isd_local_cache') as source_channel,
@@ -726,6 +737,8 @@ def observation_query(station_ids: Iterable[str]) -> str:
         coalesce(h.report_type, nullif(substring(array_to_string(h.quality_flags, '|') from 'report_type:([^|]*)'), ''), '') as report_type,
         coalesce(h.source_file_id, '') as source_file_id
     from weather.hourly_djf h
+    join weather.station st
+      on st.station_id = h.station_id
     where h.station_id in ({station_list})
       and h.dry_bulb_f is not null
     order by h.station_id, h.hour_ending_utc
@@ -745,6 +758,8 @@ def iter_station_observations(
     raw_rows: list[dict[str, str]] = []
     for row in psql_csv_stream(psql, host, port, dbname, user, observation_query(station_ids)):
         station_id = row["station_id"]
+        if not is_land_plant_observation_eligible(station_id, row.get("report_type")):
+            continue
         if current_station is not None and station_id != current_station:
             yield current_station, obs, raw_rows
             obs = []
@@ -817,6 +832,8 @@ class StationObservationCache:
                 observation_query(missing),
             ):
                 station_id = row["station_id"]
+                if not is_land_plant_observation_eligible(station_id, row.get("report_type")):
+                    continue
                 obs_list, raw_by_hour = loaded[station_id]
                 obs_list.append(
                     HourObs(
@@ -1131,7 +1148,7 @@ def build_outputs(
                             f"{hours_short} more populated winter hours needed to meet the "
                             f"{MIN_PUBLISH_COVERAGE:.0%} publish floor"
                             if adequacy.confidence_tier == "provisional_review"
-                            else "ADR-0005 publish floor met; public ECWT written"
+                            else "ADR-0006 publish floor met; public ECWT written"
                         ),
                         "provenance_summary_json": json.dumps(summary, sort_keys=True),
                         "contributing_towers_json": json.dumps(summary["towers"], sort_keys=True),
@@ -1232,12 +1249,13 @@ def create_load_sql(
     release_csv = Path(str(outputs["release_csv"]))
     release_sha = sha256_file(release_csv)
     params = {
-        "adr": "ADR-0005",
+        "adr": "ADR-0006",
         "station_candidate_run_id": outputs["station_candidate_run_id"],
         "calculation_date": outputs["calculation_date"],
         "expected_djf_hours": outputs["expected_djf_hours"],
         "min_publish_coverage": MIN_PUBLISH_COVERAGE,
         "release_id": release_id,
+        "land_plant_station_scope": "ADR-0006 excludes marine/ship platforms from land-plant composites",
     }
     result_temp = ",\n    ".join(f"{field} text" for field in RESULT_FIELDS)
     source_temp = ",\n    ".join(f"{field} text" for field in SOURCE_FIELDS)
@@ -1249,10 +1267,10 @@ insert into audit.methodology_version (
     methodology_version, methodology_name, effective_at_utc, source_standard, notes
 ) values (
     {sql_literal(METHODOLOGY_VERSION)},
-    'ADR-0005 observational ECWT calculation layer',
+    'ADR-0006 land-plant observational ECWT calculation layer',
     {sql_literal(started_at.isoformat())}::timestamptz,
     'NERC EOP-012-3 / Calculating Extreme Cold Weather Temperature',
-    'Observational-only ECWT with 95% publication floor, diagnostic held values, and cold-tail provenance.'
+    'Observational-only ECWT with 95% publication floor, diagnostic held values, cold-tail provenance, and ADR-0006 marine/ship platform exclusion for land plants.'
 ) on conflict (methodology_version) do update set
     notes = excluded.notes;
 
@@ -1267,7 +1285,7 @@ insert into audit.calculation_run (
     now(),
     'succeeded',
     {sql_literal(json.dumps(params, sort_keys=True))}::jsonb,
-    'Rebuilt ADR-0005 plant ECWT layer using scripts/ecwt_core.py helpers.'
+    'Rebuilt ADR-0006 plant ECWT layer using scripts/ecwt_core.py helpers and the land-plant marine platform exclusion.'
 ) on conflict (calculation_run_id) do update set
     code_commit = excluded.code_commit,
     run_finished_at_utc = excluded.run_finished_at_utc,
@@ -1297,7 +1315,7 @@ begin
         where nullif(ecwt_f, '') is not null
           and nullif(coverage_ratio, '')::numeric < {MIN_PUBLISH_COVERAGE}
     ) then
-        raise exception 'ADR-0005 sanity failed: public ecwt_f exists below publish floor';
+        raise exception 'ADR-0006 sanity failed: public ecwt_f exists below publish floor';
     end if;
     if exists (
         select 1
@@ -1305,7 +1323,7 @@ begin
         where confidence_tier in ('provisional_review', 'blocked_no_data')
           and nullif(ecwt_f, '') is not null
     ) then
-        raise exception 'ADR-0005 sanity failed: held/blocked row carries public ecwt_f';
+        raise exception 'ADR-0006 sanity failed: held/blocked row carries public ecwt_f';
     end if;
 end $$;
 
@@ -1498,11 +1516,11 @@ insert into audit.release_manifest (
 ) values (
     {sql_literal(release_id)},
     {sql_literal(run_id)},
-    'ADR-0005 scoped plant ECWT release',
+    'ADR-0006 scoped plant ECWT release',
     now(),
     {sql_literal(code_commit)},
     {sql_literal(release_sha)},
-    'ADR-0005 observational ECWT release with 95% public publication floor and cold-tail provenance.'
+    'ADR-0006 observational ECWT release with 95% public publication floor, cold-tail provenance, and land-plant marine platform exclusion.'
 ) on conflict (release_id) do update set
     calculation_run_id = excluded.calculation_run_id,
     release_name = excluded.release_name,
@@ -1600,7 +1618,7 @@ def db_sanity_counts(
         """,
     )
     if int(scalar_rows["published_below_floor"]) or int(scalar_rows["held_rows_with_public_ecwt"]):
-        raise RuntimeError(f"ADR-0005 DB sanity failed: {scalar_rows}")
+        raise RuntimeError(f"ADR-0006 DB sanity failed: {scalar_rows}")
     return OrderedDict([("tiers", tier_rows), ("coverage", coverage_rows), ("sanity", scalar_rows)])
 
 
@@ -1615,9 +1633,9 @@ def render_status_doc(
     coverage = {row["coverage_band"]: row["rows"] for row in db_counts["coverage"]}
     sanity = db_counts["sanity"]
     lines = [
-        "# ADR-0005 ECWT Status",
+        "# ADR-0006 ECWT Status",
         "",
-        f"- ADR-0005 run ID: `{outputs['run_id']}`",
+        f"- ADR-0006 run ID: `{outputs['run_id']}`",
         f"- Release ID: `{outputs['release_id']}`",
         f"- Station candidate run ID: `{outputs['station_candidate_run_id']}`",
         f"- Calculation date: `{outputs['calculation_date']}`",
@@ -1668,7 +1686,8 @@ def render_status_doc(
         "- The release is analytical and is not a Generator Owner compliance filing.",
         "- Existing `weather.hourly_djf.obs_timestamp` is backfilled to the canonical hour where the prior loader did not retain the raw NOAA `DATE` timestamp. Future loads should populate the raw observation timestamp directly.",
         "- Full composite hours are exposed by `calc.plant_ecwt_adr0004_composite_hour`; materialized audit rows are limited to cold-tail hours to avoid duplicating the primary-station series hundreds of millions of times.",
-        "- Known tiny-sample ECWT anomalies are documented in `docs/findings/adr0004_tiny_sample_ecwt_anomalies.md`; one-hour artifacts cannot publish under ADR-0005, and below-floor rows are held with null public `ecwt_f`.",
+        "- ADR-0006 restricts land-plant composites to land stations; marine/ship platforms are excluded because their air temperatures are water-modulated and FM-13/buoy sensor failures can pass global-plausibility QC.",
+        "- Known tiny-sample ECWT anomalies are documented in `docs/findings/adr0004_tiny_sample_ecwt_anomalies.md`; one-hour artifacts cannot publish under ADR-0006, and below-floor rows are held with null public `ecwt_f`.",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")

@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Iterable
 
 from eop012_config import PROJECT_ROOT, PSQL, STAGING_ROOT, STATION_HISTORY_CSV
+from station_filters import is_land_plant_station_eligible
 
 DEFAULT_STATION_HISTORY_URL = "https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv"
 DEFAULT_STATION_HISTORY_CSV = STATION_HISTORY_CSV
 DEFAULT_STAGING_ROOT = STAGING_ROOT
 
-METHODOLOGY_VERSION = "eop012-ecwt-method-v0.2.0"
+METHODOLOGY_VERSION = "eop012-ecwt-station-candidates-v0.3.0-adr0006"
 SOURCE_FAMILY = "noaa_isd_station_history"
 
 
@@ -153,6 +154,8 @@ def parse_noaa_station_history(path: Path, source_file_id: str) -> list[dict[str
             lat = parse_float(row.get("LAT", ""))
             lon = parse_float(row.get("LON", ""))
             if sid is None or lat is None or lon is None:
+                continue
+            if not is_land_plant_station_eligible(sid):
                 continue
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 continue
