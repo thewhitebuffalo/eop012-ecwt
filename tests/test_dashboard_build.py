@@ -49,6 +49,9 @@ def main() -> int:
     check("ECWT placeholder replaced", "__ECWT_DATA__" not in html)
     check("QR placeholder replaced", "__SUPPORT_QR_DATA_URI__" not in html)
     check("QR data URI embedded", "data:image/png;base64," in html)
+    check("US outline placeholder replaced", "__US_OUTLINE_DATA__" not in html)
+    m_out = re.search(r"var OUTLINE=(\[\[.*?\]\]);", html)
+    check("US outline rings embedded", m_out is not None and len(json.loads(m_out.group(1))) > 40)
 
     m = re.search(r"window\.ECWT = (\{.*?\});</script>", html, re.DOTALL)
     check("embedded payload found", m is not None)

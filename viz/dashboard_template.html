@@ -90,6 +90,16 @@
   .foot code{background:#eef1f5;padding:1px 5px;border-radius:4px}
   .mapnote{font-size:11px;color:var(--muted);margin-top:6px}
   #map{cursor:pointer}
+  .mapwrap{position:relative}
+  .mapzoom{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;z-index:5}
+  .mapzoom button{width:30px;height:30px;font:inherit;font-size:15px;font-weight:650;line-height:1;
+    border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.10)}
+  .mapzoom button:hover{background:#eef4fb}
+  .batchrow{padding:7px 11px;border-top:1px solid var(--line);background:#f6f9fd}
+  .batchrow button{font:inherit;font-size:12px;font-weight:650;color:var(--accent);background:none;
+    border:none;cursor:pointer;padding:0;text-decoration:underline}
+  .batchrow button:disabled{color:var(--muted);text-decoration:none;cursor:default}
   .detail{position:fixed;top:0;right:0;width:360px;max-width:92vw;height:100vh;overflow:auto;
     background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(0,0,0,.12);
     padding:16px 18px;z-index:20;transform:translateX(100%);transition:transform .18s}
@@ -170,7 +180,14 @@
         <input type="search" id="plantSearch" placeholder="Search plant name&hellip;" autocomplete="off" aria-label="Search plant name">
         <div class="results" id="searchResults"></div>
       </div>
-      <canvas id="map"></canvas>
+      <div class="mapwrap">
+        <canvas id="map"></canvas>
+        <div class="mapzoom" aria-label="Map zoom controls">
+          <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+          <button id="zoomOut" type="button" aria-label="Zoom out">&minus;</button>
+          <button id="zoomReset" type="button" aria-label="Reset view" style="font-size:12px">&#8634;</button>
+        </div>
+      </div>
       <div class="legend" id="maplegend">
         <span id="legL">colder</span><div class="bar" id="legbar"></div><span id="legR">warmer</span>
       </div>
@@ -317,10 +334,21 @@
   document.getElementById("mapnote").textContent = offExtent
     ? "Map shows the contiguous U.S. extent; "+offExtent.toLocaleString()+" off-extent rows are excluded from the map. The state count and ranking are lower-48 only."
     : "Map shows all release rows within the contiguous U.S. extent.";
+  // Simplified lower-48 outline rings ([[lon,lat],...]) injected at build time.
+  var OUTLINE=__US_OUTLINE_DATA__;
+  // Zoom/pan view: k = zoom factor, x/y = pixel offset applied after base projection.
+  var view={k:1,x:0,y:0};
+  function clampView(){
+    var w=cv._w||1,h=cv._h||1;
+    view.k=Math.min(16,Math.max(1,view.k));
+    if(view.k===1){view.x=0;view.y=0;return;}
+    view.x=Math.min(0,Math.max(w-w*view.k,view.x));
+    view.y=Math.min(0,Math.max(h-h*view.k,view.y));
+  }
   function project(p,w,h){
     var x=(p.lo-LON0)/(LON1-LON0)*w;
     var y=(LAT1-p.la)/(LAT1-LAT0)*h;
-    return [x,y];
+    return [x*view.k+view.x,y*view.k+view.y];
   }
   function drawMap(){
     var w=Math.max(cv.clientWidth,1);
@@ -328,18 +356,34 @@
     if(w<540) h=Math.max(h,260);
     var dpr=window.devicePixelRatio||1;
     cv.width=w*dpr; cv.height=h*dpr; cv.style.height=h+"px";
+    cv._w=w; cv._h=h;
+    clampView();
     ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,w,h);
     ctx.fillStyle="#fbfcfd"; ctx.fillRect(0,0,w,h);
+    // state outlines under the points
+    ctx.beginPath();
+    for(var ri=0;ri<OUTLINE.length;ri++){
+      var ring=OUTLINE[ri];
+      for(var pi=0;pi<ring.length;pi++){
+        var gxy=project({lo:ring[pi][0],la:ring[pi][1]},w,h);
+        if(pi===0)ctx.moveTo(gxy[0],gxy[1]); else ctx.lineTo(gxy[0],gxy[1]);
+      }
+      ctx.closePath();
+    }
+    ctx.fillStyle="#f2f5f9"; ctx.fill();
+    ctx.strokeStyle="#d5dce6"; ctx.lineWidth=Math.min(1,0.7+view.k*0.02); ctx.stroke();
+    var dotR=1.7*Math.sqrt(view.k);
     for(var i=0;i<pts.length;i++){
       var p=pts[i];
       if(p.lo<LON0||p.lo>LON1||p.la<LAT0||p.la>LAT1) continue;
       var xy=project(p,w,h);
-      var col, r=1.7, a=0.82;
+      if(xy[0]<-8||xy[0]>w+8||xy[1]<-8||xy[1]>h+8) continue;
+      var col, r=dotR, a=0.82;
       if(mode==="temp"){col=tempColor(p.e);}
       else if(mode==="dist"){col=distColor(p.d);}
       else { // below 32 highlight
-        if(p.e<32){col="#b4232a";a=0.85;} else {col="#cfd6e0";a=0.5;r=1.3;}
+        if(p.e<32){col="#b4232a";a=0.85;} else {col="#cfd6e0";a=0.5;r=dotR*0.76;}
       }
       ctx.globalAlpha=a; ctx.fillStyle=col;
       ctx.beginPath(); ctx.arc(xy[0],xy[1],r,0,6.2832); ctx.fill();
@@ -351,8 +395,41 @@
       ctx.beginPath(); ctx.arc(sxy[0],sxy[1],6.5,0,6.2832); ctx.lineWidth=1.6; ctx.strokeStyle="#11161f"; ctx.stroke();
     }
     ctx.globalAlpha=1;
-    cv._w=w; cv._h=h;
   }
+  // zoom helpers: zoom about a canvas pixel so the point under the cursor stays put
+  function zoomAt(mx,my,factor){
+    var k0=view.k;
+    var k1=Math.min(16,Math.max(1,k0*factor));
+    if(k1===k0)return;
+    view.x=mx-(mx-view.x)*(k1/k0);
+    view.y=my-(my-view.y)*(k1/k0);
+    view.k=k1;
+    drawMap();
+  }
+  document.getElementById("zoomIn").onclick=function(){zoomAt((cv._w||0)/2,(cv._h||0)/2,1.6);};
+  document.getElementById("zoomOut").onclick=function(){zoomAt((cv._w||0)/2,(cv._h||0)/2,1/1.6);};
+  document.getElementById("zoomReset").onclick=function(){view={k:1,x:0,y:0};drawMap();};
+  cv.addEventListener("wheel",function(ev){
+    ev.preventDefault();
+    var rect=cv.getBoundingClientRect();
+    zoomAt(ev.clientX-rect.left,ev.clientY-rect.top,ev.deltaY<0?1.25:0.8);
+  },{passive:false});
+  // drag to pan (suppresses the click->detail when the pointer actually moved)
+  var dragState=null, dragMoved=false;
+  cv.addEventListener("pointerdown",function(ev){
+    if(view.k===1)return;
+    dragState={x:ev.clientX,y:ev.clientY,vx:view.x,vy:view.y};
+    dragMoved=false;
+    cv.setPointerCapture&&cv.setPointerCapture(ev.pointerId);
+  });
+  cv.addEventListener("pointermove",function(ev){
+    if(!dragState)return;
+    var dx=ev.clientX-dragState.x, dy=ev.clientY-dragState.y;
+    if(Math.abs(dx)>4||Math.abs(dy)>4)dragMoved=true;
+    if(dragMoved){view.x=dragState.vx+dx;view.y=dragState.vy+dy;drawMap();}
+  });
+  cv.addEventListener("pointerup",function(){dragState=null;});
+  cv.addEventListener("pointercancel",function(){dragState=null;dragMoved=false;});
   // legend text per mode
   function updLegend(){
     var lb=document.getElementById("legbar"), L=document.getElementById("legL"), R=document.getElementById("legR");
@@ -437,6 +514,7 @@
     drawMap();
   }
   cv.addEventListener("click",function(ev){
+    if(dragMoved){dragMoved=false;return;} // pan gesture, not a pick
     var rect=cv.getBoundingClientRect();
     var mx=ev.clientX-rect.left, my=ev.clientY-rect.top, w=cv._w,h=cv._h;
     var best=null,bd=120;
@@ -708,10 +786,12 @@
   }
 
   // ---------- SUPPORT ASK (shown once per session, after a download) ----------
-  var supportSeen=false;
+  var supportSeen=false, supportPrevFocus=null;
   function closeSupport(){
     var m=document.getElementById("supportModal");
     if(m){m.classList.remove("show");m.setAttribute("aria-hidden","true");}
+    if(supportPrevFocus&&supportPrevFocus.focus){try{supportPrevFocus.focus();}catch(e){}}
+    supportPrevFocus=null;
   }
   function showSupport(p){
     if(supportSeen) return;
@@ -721,6 +801,9 @@
     var pl=document.getElementById("supportPlant");
     if(pl) pl.textContent=(p && p.n)?("for "+p.n):"";
     m.classList.add("show"); m.setAttribute("aria-hidden","false");
+    supportPrevFocus=document.activeElement;
+    var c=document.getElementById("supportClose");
+    if(c) c.focus();
   }
   (function(){
     var m=document.getElementById("supportModal");
@@ -735,15 +818,46 @@
   // ---------- PLANT NAME SEARCH ----------
   (function(){
     var box=document.getElementById("plantSearch"), rez=document.getElementById("searchResults");
-    var cur=[], active=-1;
+    var cur=[], curAll=[], active=-1;
+    var BATCH_MAX=300;
     function render(){
       if(!cur.length){rez.innerHTML='<div class="empty">No plant names match.</div>';rez.classList.add("show");return;}
-      rez.innerHTML=cur.map(function(p,i){
+      var html=cur.map(function(p,i){
         var alias=(p.a&&p.a.length)?' &middot; '+esc(p.a[0]):'';
         return '<div class="item" data-i="'+i+'"><span class="nm">'+esc(p.n||"(unnamed)")+
           '</span><span class="meta">'+esc(p.s||"")+' &middot; '+fmt(p.e)+'&deg;F'+alias+'</span></div>';
       }).join("");
+      var withEcwt=curAll.filter(function(p){return p.e!=null;}).length;
+      if(withEcwt>1){
+        html+='<div class="batchrow"><button type="button" id="batchRsaw">Download RSAW R1 worksheets for all '+
+          Math.min(withEcwt,BATCH_MAX).toLocaleString()+' matching plants (zip)</button>'+
+          (withEcwt>BATCH_MAX?'<span class="empty" style="padding:0 0 0 6px">first '+BATCH_MAX+' of '+withEcwt.toLocaleString()+'</span>':'')+'</div>';
+      }
+      rez.innerHTML=html;
       rez.classList.add("show");
+      var bb=document.getElementById("batchRsaw");
+      if(bb) bb.onclick=function(){batchRSAW(bb);};
+    }
+    async function batchRSAW(btn){
+      var list=curAll.filter(function(p){return p.e!=null;}).slice(0,BATCH_MAX);
+      if(!list.length)return;
+      btn.disabled=true;
+      var files=[],seen={};
+      for(var i=0;i<list.length;i++){
+        btn.textContent="Building "+(i+1)+" / "+list.length+"…";
+        var name="RSAW_EOP-012-3_R1_"+slug(list[i].n);
+        if(seen[name]!=null){seen[name]++;name+="_"+seen[name];}else{seen[name]=0;}
+        var buf=await buildRSAWDocx(list[i]).arrayBuffer();
+        files.push({name:name+".docx",data:new Uint8Array(buf)});
+      }
+      var zip=zipStore(files);
+      var url=URL.createObjectURL(zip);
+      var a=document.createElement("a");
+      a.href=url; a.download="RSAW_EOP-012-3_R1_batch_"+slug(box.value||"plants")+"_"+list.length+".zip";
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){URL.revokeObjectURL(url); if(a.parentNode)a.parentNode.removeChild(a);},0);
+      btn.textContent="Downloaded "+list.length+" worksheets";
+      showSupport({n:list.length+" plants"});
     }
     function mark(){
       [].forEach.call(rez.querySelectorAll(".item"),function(el){
@@ -754,13 +868,13 @@
     }
     function search(q){
       q=q.trim().toLowerCase(); active=-1;
-      if(q.length<2){cur=[];rez.classList.remove("show");return;}
+      if(q.length<2){cur=[];curAll=[];rez.classList.remove("show");return;}
       var out=[];
-      for(var i=0;i<pts.length && out.length<25;i++){
+      for(var i=0;i<pts.length;i++){
         var p=pts[i], hay=((p.n||"")+' '+((p.a||[]).join(" "))).toLowerCase();
         if(hay.indexOf(q)>-1) out.push(p);
       }
-      cur=out; render();
+      curAll=out; cur=out.slice(0,25); render();
     }
     function choose(i){
       if(i<0||i>=cur.length)return;
