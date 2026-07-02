@@ -482,3 +482,92 @@ Future NOAA and ECWT phases should follow the same pattern:
 3. Record source hashes, row counts, exceptions, and the producing Git commit.
 4. Publish small reports and manifests to Git.
 5. Keep heavy raw/weather/database artifacts outside Git.
+
+---
+
+# Part 2 — Computing And Publishing An ECWT Release
+
+Part 1 above ends with EIA-860 and NOAA data loaded. This part is the chain
+that turns loaded data into the published, auditable release — the steps that
+produce every public ECWT value. See [`docs/pipeline.md`](pipeline.md) for the
+full stage map.
+
+> Flags shown are each script's own CLI (`--help` is authoritative). Run-id
+> wiring between steps follows the audit schema (`docs/audit_schema.md`): each
+> step records a run id that the next step consumes. Verify ids against your
+> run log; the maintainer run for the current release is
+> `plant_ecwt_adr0004_20260626T235840Z`.
+
+## Rebuild The Plant ECWT Layer (the calculation)
+
+Nearest-first composite fill of every DJF hour per plant, per-hour provenance,
+0.2-percentile ECWT, and ADR-0005 confidence tiers:
+
+```bash
+python scripts/rebuild_adr0004_ecwt_layer.py \
+  --host 127.0.0.1 --port 5436 --dbname eop012 \
+  --station-candidate-run-id <stage-2 run id> \
+  --calc-date <YYYY-MM-DD> \
+  --run-id plant_ecwt_adr0004_<ts> \
+  --release-id scoped_plant_ecwt_adr0004_release_<ts>
+```
+
+Useful switches: `--limit-plants` for a smoke run, `--skip-db-load` /
+`--skip-hourly-provenance-backfill` for partial re-runs.
+
+## Export The Scoped Release CSV
+
+```bash
+python scripts/export_scoped_plant_ecwt_dataset.py \
+  --host 127.0.0.1 --port 5436 --dbname eop012 \
+  --policy-result-run-id <run id from the rebuild>
+```
+
+This writes the wide `data/processed/scoped_plant_ecwt_*_release_<ts>.csv`
+carrying, per plant: public ECWT (null when held), discrete-rank and
+diagnostic values, confidence tier, coverage counts, primary station and
+distance, `contributing_towers`, `source_channels`, and
+`cold_tail_provenance`.
+
+## Build The Release Manifest
+
+```bash
+python scripts/build_scoped_release_manifest.py \
+  --host 127.0.0.1 --port 5436 --dbname eop012 \
+  --release-id scoped_plant_ecwt_adr0004_release_<ts> \
+  --plant-ecwt-run-id plant_ecwt_adr0004_<ts>
+```
+
+The SHA-256 manifest covers the immutable data CSVs only — never the
+dashboard, which is a living UI artifact rebuilt for reasons unrelated to the
+data (CI enforces this).
+
+## Validate The Release
+
+```bash
+python scripts/validate_ecwt_release.py \
+  --results-csv data/processed/plant_ecwt_adr0004_<ts>_results.csv \
+  --cold-tail-csv data/processed/plant_ecwt_adr0004_<ts>_cold_tail_hours_part*.csv
+```
+
+One pass of PASS/WARN/FAIL/INFO acceptance checks against the ADR-0005 rules
+(coverage floor, held-row nulling, sanity bounds). Details:
+[`docs/validating_ecwt_release.md`](validating_ecwt_release.md). Do not
+publish a release with a FAIL.
+
+## Rebuild The Dashboard
+
+```bash
+python scripts/build_ecwt_dashboard.py \
+  --release-csv data/processed/scoped_plant_ecwt_adr0004_release_<ts>.csv \
+  --output build/EOP012_ADR0004_ECWT_dashboard.html
+```
+
+Commit the regenerated dashboard (it is the in-repo viewable artifact and is
+deployed to GitHub Pages from `main`).
+
+## Publish
+
+Tag the run and attach the output CSVs plus the SHA-256 manifest as GitHub
+Release assets — the repository never carries the CSVs themselves. The full
+convention (tag naming, asset list, verification): [`docs/releasing.md`](releasing.md).
