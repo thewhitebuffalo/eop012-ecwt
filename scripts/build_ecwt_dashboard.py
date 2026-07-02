@@ -41,8 +41,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TEMPLATE = REPO_ROOT / "viz" / "dashboard_template.html"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "EOP012_ECWT_dashboard.html"
 DEFAULT_SUPPORT_QR = REPO_ROOT / "viz" / "assets" / "buymeacoffee_qr.png"
+DEFAULT_US_OUTLINE = REPO_ROOT / "viz" / "assets" / "us_states_outline.json"
 PLACEHOLDER = "__ECWT_DATA__"
 SUPPORT_QR_PLACEHOLDER = "__SUPPORT_QR_DATA_URI__"
+US_OUTLINE_PLACEHOLDER = "__US_OUTLINE_DATA__"
 
 LOWER_48_STATES = {
     "AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL",
@@ -349,6 +351,8 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     ap.add_argument("--support-qr", type=Path, default=DEFAULT_SUPPORT_QR,
                     help="QR image embedded in the dashboard support prompt.")
+    ap.add_argument("--us-outline", type=Path, default=DEFAULT_US_OUTLINE,
+                    help="Simplified lower-48 state outline rings (JSON) drawn under the map points.")
     args = ap.parse_args()
 
     if not args.release_csv.exists():
@@ -368,6 +372,11 @@ def main() -> int:
         mime_type = mimetypes.guess_type(args.support_qr.name)[0] or "image/png"
         qr_data = base64.b64encode(args.support_qr.read_bytes()).decode("ascii")
         html = html.replace(SUPPORT_QR_PLACEHOLDER, f"data:{mime_type};base64,{qr_data}")
+    if US_OUTLINE_PLACEHOLDER in html:
+        if not args.us_outline.exists():
+            raise SystemExit(f"US outline asset not found: {args.us_outline}")
+        outline = json.loads(args.us_outline.read_text(encoding="utf-8"))  # validate before embedding
+        html = html.replace(US_OUTLINE_PLACEHOLDER, json.dumps(outline, separators=(",", ":")))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(html, encoding="utf-8")
