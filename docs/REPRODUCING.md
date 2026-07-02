@@ -482,3 +482,100 @@ Future NOAA and ECWT phases should follow the same pattern:
 3. Record source hashes, row counts, exceptions, and the producing Git commit.
 4. Publish small reports and manifests to Git.
 5. Keep heavy raw/weather/database artifacts outside Git.
+
+---
+
+# Part 2 — Computing And Publishing An ECWT Release
+
+Part 1 above ends with EIA-860 and NOAA data loaded. This part is the chain
+that turns loaded data into the published, auditable release — the steps that
+produce every public ECWT value. See [`docs/pipeline.md`](pipeline.md) for the
+full stage map.
+
+> Flags shown are each script's own CLI (`--help` is authoritative). The
+> current published release was checked against the maintainer run log:
+> calculation run `plant_ecwt_adr0004_20260626T235840Z`, release id
+> `scoped_plant_ecwt_adr0004_release_20260626T235840Z`, station candidate run
+> `noaa_station_candidates_20260625T065445Z`, calculation date `2025-03-01`,
+> producing code commit `50e2d1aeedfbbf1c9f88605835a10fd194d3833e`.
+
+## Rebuild The Plant ECWT Layer (the calculation)
+
+Nearest-first composite fill of every DJF hour per plant, per-hour provenance,
+0.2-percentile ECWT, and ADR-0005 confidence tiers:
+
+```bash
+python scripts/rebuild_adr0004_ecwt_layer.py \
+  --psql "$PG_BIN/psql" \
+  --host 127.0.0.1 --port 5436 --dbname eop012 \
+  --station-candidate-run-id noaa_station_candidates_20260625T065445Z \
+  --calc-date 2025-03-01 \
+  --run-id plant_ecwt_adr0004_20260626T235840Z \
+  --release-id scoped_plant_ecwt_adr0004_release_20260626T235840Z \
+  --skip-hourly-provenance-backfill \
+  --station-cache-size 384 \
+  --station-batch-size 16
+```
+
+The maintainer invocation relied on the script defaults/autodiscovery for the
+same run id, release id, station-candidate run, and calculation date; the
+explicit form above is safer for reproduction. Use `--limit-plants` for a
+smoke run and `--skip-db-load` only when inspecting output generation without
+writing database rows.
+
+This rebuild step writes the release-facing artifacts directly:
+
+- `data/processed/scoped_plant_ecwt_adr0004_release_20260626T235840Z.csv`
+- `data/processed/plant_ecwt_adr0004_20260626T235840Z_results.csv`
+- `data/processed/plant_ecwt_adr0004_20260626T235840Z_sources.csv`
+- `data/processed/plant_ecwt_adr0004_20260626T235840Z_cold_tail_hours_part*.csv`
+- `docs/adr0004_ecwt_status.md`
+
+## Build The Release Manifest
+
+```bash
+TS=20260626T235840Z
+shasum -a 256 \
+  data/processed/scoped_plant_ecwt_adr0004_release_${TS}.csv \
+  data/processed/plant_ecwt_adr0004_${TS}_results.csv \
+  data/processed/plant_ecwt_adr0004_${TS}_sources.csv \
+  data/processed/plant_ecwt_adr0004_${TS}_cold_tail_hours_part*.csv \
+  > data/processed/adr0004_release_${TS}_SHA256SUMS.txt
+```
+
+The SHA-256 manifest covers the immutable data CSVs only — never the
+dashboard, which is a living UI artifact rebuilt for reasons unrelated to the
+data (CI enforces this). `scripts/build_scoped_release_manifest.py` remains a
+supporting tool for older scoped policy-result exports; it was not the final
+manifest-producing step for the current ADR-0005 release.
+
+## Validate The Release
+
+```bash
+python scripts/validate_ecwt_release.py \
+  --results-csv data/processed/plant_ecwt_adr0004_20260626T235840Z_results.csv \
+  --cold-tail-csv data/processed/plant_ecwt_adr0004_20260626T235840Z_cold_tail_hours_part*.csv
+```
+
+One pass of PASS/WARN/FAIL/INFO acceptance checks against the ADR-0005 rules
+(coverage floor, held-row nulling, sanity bounds). Details:
+[`docs/validating_ecwt_release.md`](validating_ecwt_release.md). Do not
+publish a release with a FAIL.
+
+## Rebuild The Dashboard
+
+```bash
+python scripts/build_ecwt_dashboard.py \
+  --release-csv data/processed/scoped_plant_ecwt_adr0004_release_20260626T235840Z.csv \
+  --template viz/dashboard_template.html \
+  --output build/EOP012_ADR0004_ECWT_dashboard.html
+```
+
+Commit the regenerated dashboard (it is the in-repo viewable artifact and is
+deployed to GitHub Pages from `main`).
+
+## Publish
+
+Tag the run and attach the output CSVs plus the SHA-256 manifest as GitHub
+Release assets — the repository never carries the CSVs themselves. The full
+convention (tag naming, asset list, verification): [`docs/releasing.md`](releasing.md).
