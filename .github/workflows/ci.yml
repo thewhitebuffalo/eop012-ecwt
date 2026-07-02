@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run test suite (stdlib only)
+        run: python tests/run_all.py
+
+      - name: JS syntax check on built dashboard
+        run: |
+          python - <<'EOF'
+          import re, subprocess, sys, tempfile, pathlib
+          out = pathlib.Path(tempfile.mkdtemp()) / "dash.html"
+          subprocess.run([sys.executable, "scripts/build_ecwt_dashboard.py",
+                          "--release-csv", "tests/fixtures/scoped_release_fixture.csv",
+                          "--output", str(out)], check=True)
+          html = out.read_text(encoding="utf-8")
+          blocks = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+          assert blocks, "no script blocks found"
+          for i, js in enumerate(blocks):
+              p = out.parent / f"block{i}.js"
+              p.write_text(js, encoding="utf-8")
+              subprocess.run(["node", "--check", str(p)], check=True)
+          print(f"{len(blocks)} script block(s) parse cleanly")
+          EOF
+
+      - name: Manifest integrity policy
+        run: |
+          python - <<'EOF'
+          import hashlib, pathlib, sys
+          bad = False
+          for manifest in pathlib.Path("data/processed").glob("*SHA256SUMS*.txt"):
+              for line in manifest.read_text(encoding="utf-8").splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  digest, _, rel = line.partition("  ")
+                  if rel.startswith("build/"):
+                      print(f"{manifest}: POLICY FAIL - dashboard artifact in data manifest: {rel}")
+                      bad = True
+                      continue
+                  p = pathlib.Path(rel)
+                  if p.exists():  # release CSVs live in Releases, not the repo; verify only what is present
+                      actual = hashlib.sha256(p.read_bytes()).hexdigest()
+                      if actual != digest:
+                          print(f"{manifest}: HASH MISMATCH for {rel}")
+                          bad = True
+                      else:
+                          print(f"verified {rel}")
+                  else:
+                      print(f"skipped (not in repo): {rel}")
+          sys.exit(1 if bad else 0)
+          EOF
