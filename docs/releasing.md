@@ -7,9 +7,9 @@ docs, the SHA-256 manifest, and the built dashboard.
 
 ## Convention
 
-- **Tag name:** `ecwt-adr0004-<ts>` where `<ts>` is the run timestamp shared by
-  the run id and release id (example: `ecwt-adr0004-20260626T235840Z`).
-- **Release title:** `ADR-0004 ECWT Release <ts>` (bump the ADR label when the
+- **Tag name:** `ecwt-adr0006-<ts>` where `<ts>` is the run timestamp shared by
+  the run id and release id (example: `ecwt-adr0006-20260702T000000Z`).
+- **Release title:** `ADR-0006 ECWT Release <ts>` (bump the ADR label when the
   governing methodology changes).
 - **Assets** (all produced by the release build step):
   - `scoped_plant_ecwt_*_release_<ts>.csv` — the audit record: per-plant ECWT + provenance
@@ -24,17 +24,17 @@ docs, the SHA-256 manifest, and the built dashboard.
 With the [GitHub CLI](https://cli.github.com/):
 
 ```bash
-TS=20260626T235840Z
-TARGET_COMMIT=87c447b877e9f172d3a8a0cb5b36258147c3e323
-gh release create "ecwt-adr0004-$TS" \
+TS=20260702T000000Z
+TARGET_COMMIT=<commit-sha>
+gh release create "ecwt-adr0006-$TS" \
   --target "$TARGET_COMMIT" \
-  --title "ADR-0004 ECWT Release $TS" \
-  --notes "ADR-0005 publication floor in force. Validator: PASS. See docs/adr/." \
-  data/processed/scoped_plant_ecwt_adr0004_release_${TS}.csv \
-  data/processed/plant_ecwt_adr0004_${TS}_results.csv \
-  data/processed/plant_ecwt_adr0004_${TS}_sources.csv \
-  data/processed/plant_ecwt_adr0004_${TS}_cold_tail_hours_part*.csv \
-  data/processed/adr0004_release_${TS}_SHA256SUMS.txt
+  --title "ADR-0006 ECWT Release $TS" \
+  --notes "ADR-0006 land-plant marine platform exclusion in force. Validator: PASS. See docs/adr/." \
+  data/processed/scoped_plant_ecwt_adr0006_release_${TS}.csv \
+  data/processed/plant_ecwt_adr0006_${TS}_results.csv \
+  data/processed/plant_ecwt_adr0006_${TS}_sources.csv \
+  data/processed/plant_ecwt_adr0006_${TS}_cold_tail_hours_part*.csv \
+  data/processed/adr0006_release_${TS}_SHA256SUMS.txt
 ```
 
 Add assets to an existing release with `gh release upload <tag> <files...>`.
@@ -51,7 +51,7 @@ release CSV embedded inside it.
 ## Verifying a download
 
 ```bash
-sha256sum -c adr0004_release_<ts>_SHA256SUMS.txt --ignore-missing
+sha256sum -c adr0006_release_<ts>_SHA256SUMS.txt --ignore-missing
 ```
 
 (Windows: `CertUtil -hashfile <file> SHA256` and compare.)

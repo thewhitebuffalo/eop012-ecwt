@@ -29,7 +29,7 @@ EIA-860 universe          NOAA stations & raw data
    [5] plant ECWT rebuild  — composite fill + 0.2-percentile + release CSVs
                  |
                  v
-   [6] validation  — ADR-0005 acceptance checks
+   [6] validation  — ADR-0006 acceptance checks
                  |
                  v
    [7] dashboard rebuild  — self-contained Pages artifact
@@ -41,10 +41,10 @@ EIA-860 universe          NOAA stations & raw data
 | Stage | Script | Role |
 | --- | --- | --- |
 | shared | `eop012_config.py` | Environment-backed path defaults for every CLI script |
-| shared | `ecwt_core.py` | Pure, tested helpers: `PERCENTILE.INC`-equivalent percentile, expected DJF hours, ADR-0005 adequacy gates |
+| shared | `ecwt_core.py` | Pure, tested helpers: `PERCENTILE.INC`-equivalent percentile, expected DJF hours, adequacy gates |
 | 1 | `build_eia860_asset_inventory.py` | Extract + audit the EIA-860 plant/generator universe |
 | 1 | `load_eia860_assets_to_postgres.py` | Load the universe into Postgres |
-| 2 | `load_noaa_station_candidates.py` | Station catalog + plant–station distance candidates |
+| 2 | `load_noaa_station_candidates.py` | Station catalog + plant–station distance candidates; ADR-0006 excludes marine/ship platform classes for land plants |
 | 2 | `load_noaa_weather_coverage_audit.py` | Station coverage audit tables |
 | 2 | `build_station_year_djf_coverage.py` | Station-year DJF coverage rollups |
 | 3 | `inventory_noaa_raw_files.py` | Inventory local NOAA raw caches |
@@ -52,7 +52,7 @@ EIA-860 universe          NOAA stations & raw data
 | 3 | `download_noaa_backfill_batch.py` | Fetch a backfill batch from NOAA |
 | 3 | `load_noaa_hourly_djf.py` | Load DJF hourly observations with source lineage |
 | 4 | `build_station_selection_review.py` / `apply_station_selection_review_updates.py` | Station-selection review and applied corrections |
-| 5 | `rebuild_adr0004_ecwt_layer.py` | **The calculation and release artifact build**: nearest-first composite fill, per-hour provenance, 0.2-percentile ECWT, ADR-0005 confidence tiers, result/source/scoped CSVs, cold-tail split files, and status doc |
+| 5 | `rebuild_adr0004_ecwt_layer.py` | **The calculation and release artifact build**: nearest-first composite fill, per-hour provenance, 0.2-percentile ECWT, ADR-0006 land-station scope, confidence tiers, result/source/scoped CSVs, cold-tail split files, and status doc |
 | 6 | `validate_ecwt_release.py` | One-pass PASS/WARN/FAIL acceptance checks ([usage](validating_ecwt_release.md)) |
 | 7 | `build_ecwt_dashboard.py` | Self-contained dashboard from the scoped CSV ([details](visualization.md)) |
 | 8 | (release) | Tag + attach outputs as GitHub Release assets ([convention](releasing.md)) |

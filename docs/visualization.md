@@ -2,7 +2,7 @@
 
 This repository tracks a reproducible **dashboard builder**, not the rendered
 dashboard. The builder turns a published scoped plant ECWT release CSV,
-including the ADR-0005 release shape, into a single, self-contained, offline
+including the ADR-0005/ADR-0006 release shape, into a single, self-contained, offline
 HTML dashboard.
 
 ## What it produces
@@ -32,7 +32,7 @@ containing at least:
 - optional: `primary_station_distance_km` (drives the data-quality panel)
 - optional ADR-0004 fields: `confidence_tier`, `needs_review`, `reason`,
   `source_channels`, `coverage_basis`, `publication_caveat`
-- optional ADR-0005 fields: `diagnostic_ecwt_f`, `publishable`,
+- optional ADR-0005/ADR-0006 fields: `diagnostic_ecwt_f`, `publishable`,
   `hours_short_of_publish_floor`
 
 ## Build
@@ -67,6 +67,6 @@ the release CSV and checksum manifest, or additionally publish it as:
 The dashboard reflects whatever release CSV it is given. The generated page
 surfaces source release, confidence tiers, held-row counts, review reasons, source-channel
 contributions, and station-distance buckets so diagnostic releases and
-ADR-0005 analytical releases do not get visually conflated. Regenerate it after
+ADR analytical releases do not get visually conflated. Regenerate it after
 any release that changes the adequacy or representativeness treatment
 (see `docs/adr/`).

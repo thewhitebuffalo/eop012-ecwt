@@ -34,7 +34,7 @@ DJF_MONTHS = (12, 1, 2)
 ECWT_PERCENTILE = 0.002  # lowest 0.2 percentile
 CALC_PERIOD_START = date(2000, 1, 1)
 
-# ADR-0005 publication floor. Every expected DJF winter hour counts equally (no
+# Publication floor. Every expected DJF winter hour counts equally (no
 # time-of-day weighting); an ECWT is publishable only when at least this fraction
 # of the expected winter hours is populated. Below the floor the plant is held.
 COMPLETE_COVERAGE = 0.99
