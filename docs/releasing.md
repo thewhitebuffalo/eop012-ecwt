@@ -11,7 +11,7 @@ docs, the SHA-256 manifest, and the built dashboard.
   the run id and release id (example: `ecwt-adr0004-20260626T235840Z`).
 - **Release title:** `ADR-0004 ECWT Release <ts>` (bump the ADR label when the
   governing methodology changes).
-- **Assets** (all produced by the export step):
+- **Assets** (all produced by the release build step):
   - `scoped_plant_ecwt_*_release_<ts>.csv` — the audit record: per-plant ECWT + provenance
   - `plant_ecwt_*_<ts>_results.csv` — full results table
   - `plant_ecwt_*_<ts>_sources.csv` — source/lineage table
@@ -25,7 +25,9 @@ With the [GitHub CLI](https://cli.github.com/):
 
 ```bash
 TS=20260626T235840Z
+TARGET_COMMIT=87c447b877e9f172d3a8a0cb5b36258147c3e323
 gh release create "ecwt-adr0004-$TS" \
+  --target "$TARGET_COMMIT" \
   --title "ADR-0004 ECWT Release $TS" \
   --notes "ADR-0005 publication floor in force. Validator: PASS. See docs/adr/." \
   data/processed/scoped_plant_ecwt_adr0004_release_${TS}.csv \

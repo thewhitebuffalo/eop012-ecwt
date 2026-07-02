@@ -26,16 +26,16 @@ EIA-860 universe          NOAA stations & raw data
    [4] station selection (nearest-first candidates)
                  |
                  v
-   [5] plant ECWT rebuild  — composite fill + 0.2-percentile + tiers
+   [5] plant ECWT rebuild  — composite fill + 0.2-percentile + release CSVs
                  |
                  v
-   [6] scoped export  — release CSV(s) with provenance columns
+   [6] validation  — ADR-0005 acceptance checks
                  |
                  v
-   [7] manifest + validation  — SHA-256 manifest, ADR-0005 acceptance checks
+   [7] dashboard rebuild  — self-contained Pages artifact
                  |
                  v
-   [8] publish  — tagged GitHub Release (data) + dashboard rebuild (viz)
+   [8] publish  — tagged GitHub Release with data CSVs + SHA-256 manifest
 ```
 
 | Stage | Script | Role |
@@ -52,11 +52,9 @@ EIA-860 universe          NOAA stations & raw data
 | 3 | `download_noaa_backfill_batch.py` | Fetch a backfill batch from NOAA |
 | 3 | `load_noaa_hourly_djf.py` | Load DJF hourly observations with source lineage |
 | 4 | `build_station_selection_review.py` / `apply_station_selection_review_updates.py` | Station-selection review and applied corrections |
-| 5 | `rebuild_adr0004_ecwt_layer.py` | **The calculation**: nearest-first composite fill of all winter hours, per-hour provenance, 0.2-percentile ECWT, confidence tiers (ADR-0004/0005) |
-| 6 | `export_scoped_plant_ecwt_dataset.py` | Export the wide scoped release CSV (ECWT + provenance per plant) |
-| 7 | `build_scoped_release_manifest.py` | Auditable release manifest (run ids, checksums) |
-| 7 | `validate_ecwt_release.py` | One-pass PASS/WARN/FAIL acceptance checks ([usage](validating_ecwt_release.md)) |
-| 8 | `build_ecwt_dashboard.py` | Self-contained dashboard from the scoped CSV ([details](visualization.md)) |
+| 5 | `rebuild_adr0004_ecwt_layer.py` | **The calculation and release artifact build**: nearest-first composite fill, per-hour provenance, 0.2-percentile ECWT, ADR-0005 confidence tiers, result/source/scoped CSVs, cold-tail split files, and status doc |
+| 6 | `validate_ecwt_release.py` | One-pass PASS/WARN/FAIL acceptance checks ([usage](validating_ecwt_release.md)) |
+| 7 | `build_ecwt_dashboard.py` | Self-contained dashboard from the scoped CSV ([details](visualization.md)) |
 | 8 | (release) | Tag + attach outputs as GitHub Release assets ([convention](releasing.md)) |
 
 ## Supporting / situational
@@ -70,6 +68,7 @@ Used when their situation arises, not on every run:
 `build_provisional_plant_ecwt.py`, `materialize_policy_ecwt_results.py`,
 `build_plant_ecwt_readiness.py`, `build_readiness_policy_scenarios.py`,
 `load_readiness_policy_scenarios_to_db.py`,
+`build_scoped_release_manifest.py`, `export_scoped_plant_ecwt_dataset.py`,
 `export_plant_ecwt_release_ready.py`,
 `export_plant_ecwt_publication_candidates.py`.
 
